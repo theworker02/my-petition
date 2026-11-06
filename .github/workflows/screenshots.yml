@@ -7,6 +7,7 @@ on:
     paths:
       - 'src/**'
       - 'worker/**'
+      - 'shared/**'
       - 'migrations/**'
       - 'fixtures/**'
       - 'scripts/capture-screenshots.mjs'

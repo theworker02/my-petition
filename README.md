@@ -45,7 +45,7 @@ My Petition lets communities discuss a clear question, record support and opposi
 - **Optional account to save petitions.** Create an account or log in to build a personal saved collection. Accounts do not automatically merge prior guest activity.
 - **Petitions and polls.** Petition pages have a separate opt-in electronic signing experience. Poll pages collect support or opposition.
 - **Optional name display.** Guest voters choose whether to show a display name; comments always show a chosen public name. Names in ordinary votes can be hidden, but vote storage is **not cryptographically anonymous**.
-- **Electronic signatures with audit evidence.** To sign a petition, verify an email address, enter a legal name, explicitly consent, and receive a private JSON receipt. The record includes a document fingerprint, timestamp, and protected metadata. There is **no guarantee that a particular jurisdiction accepts the signature for statutory petition purposes**.
+- **Tamper-evident electronic signatures.** Verify an email address, enter a legal name, explicitly consent to the petition, and receive a private JSON receipt. New records include a timestamp, petition fingerprint, protected metadata and a server-held HMAC integrity seal. Anyone with the unpredictable receipt ID can check integrity without seeing the signer name or email. This is **not independent identity verification or legal certification**.
 - **Local participation controls.** Creators can limit votes and signatures to independently approved local participants. Locality claims begin as *pending*, and a moderator must separately verify eligibility using documented evidence.
 - **Share, embed, and follow.** Copy links, use the browser share sheet, copy iframe embed markup, receive in-app notifications, or save petitions with an account.
 - **Community safety.** Report proposals or comments for review; an allowlisted, email-verified moderator may review reports and hide content.
@@ -89,9 +89,20 @@ Only petitions have a signing panel.
 2. Submit an email address and enter the six-digit code sent to that address.
 3. Enter your full legal name and review the exact petition before signing.
 4. Optionally make your signer name public. Check the explicit electronic-signature consent box.
-5. Confirm the signature and **Download your signature receipt**. Keep the receipt private—it includes your name and email address.
+5. Confirm the signature and **Download your signature receipt**. Keep the receipt private—it includes your name and email address. If you explicitly opt in, your full legal name can appear in the public signer directory.
 
 A signature is recorded separately from a support/oppose vote. Its database record includes the verified email, exact document hash, consent version, signing timestamp, and protected connection fingerprints. **Email ownership is not proof of identity; this is not qualified/digital-certificate signing or government certification.**
+
+### 4a. Verify a signature receipt
+
+1. Download the private receipt and open its **Verify integrity of receipt** link, or visit `/verify-signature`.
+2. Enter the receipt UUID from `receipt.id`.
+3. The server checks whether the stored signing evidence still matches the original integrity seal and returns the petition link and document fingerprint.
+4. The public verification response intentionally excludes the signer's name, email, account ID, IP fingerprint, and private connection metadata.
+
+New signatures use a keyed HMAC seal protected by `AUDIT_HASH_SECRET`. Previous signatures without an integrity seal are labeled **unsealed**, never cryptographically verified. Losing or rotating this secret without a managed migration can make older seals unverifiable.
+
+**Limits:** The same site operator controls the database and seal key. This is server-side tamper evidence, not independent certification. It does not establish the person's legal identity, physical residence or eligibility. Statutory petition rules may not accept these signatures.
 
 ### 5. Request local verification, when required
 
@@ -128,7 +139,12 @@ npm run typecheck
 npm run build
 npm run db:local
 npx wrangler deploy --dry-run
+npm run test:smoke
 ~~~
+
+### API smoke tests
+
+Run `npm run test:smoke` after a local database migration and frontend build. The suite launches a local Cloudflare Worker and validates guest participation, vote changes, public comments, duplicate reports, optional saved proposals, local eligibility gates, and traceable signing. For signatures, it inserts a synthetic verified-email fixture in local D1 and uses a temporary test-only audit secret: **it never sends actual email or touches production records**.
 
 ### Run a local demo dataset (screenshots/testing only)
 
@@ -191,7 +207,8 @@ my-petition/
 │   ├── styles.css         # Core design system and responsive UI
 │   └── features.css       # Component styling
 ├── worker/index.ts        # Cloudflare Worker API (Hono)
-├── migrations/            # Versioned D1 SQL migrations
+├── migrations/            # Versioned D1 migrations and signature integrity seal
+├── shared/signature.ts     # Versioned e-signature consent text used by UI and API
 ├── fixtures/              # Local-only example data for screenshots
 ├── scripts/               # Automated Chromium screenshot capture
 ├── docs/screenshots/      # Actual captured UI images (generated)
@@ -209,6 +226,7 @@ my-petition/
 | `POST /api/proposals` | Guest or registered proposal creation |
 | `POST /api/proposals/:slug/vote` | Submit or update a response |
 | `POST /api/proposals/:slug/sign` | Record consent-based electronic signature |
+| `GET /api/signatures/:id/verify` | Verify a receipt seal without disclosing signer identity |
 | `GET /api/proposals/:slug/signature-receipt` | Signer's private receipt |
 | `POST /api/verification/email/request` | Email a verification code |
 | `POST /api/verification/email/confirm` | Verify a code |
@@ -224,7 +242,7 @@ my-petition/
 - **Anonymous display ≠ secret ballot.** A name-hidden vote remains linked to an internal participant ID. E-signature evidence must remain private and only accessible to authorized parties.
 - **Guest identity is weak.** A cookie-based visitor can register again in another browser. Scores and tallies are advisory.
 - **Email verification is not identity verification.** Owning an email inbox does not establish legal name, residency, or uniqueness.
-- **Legal treatment of signatures varies.** The app records intent and evidence, but does not provide qualified signatures or automatically satisfy ballot-access, elections, or other statutory petition requirements.
+- **Legal treatment of signatures varies.** The app records intent and sealed evidence, but server-held integrity seals are not an independent attestation. They do not provide qualified signatures, independently verified identity or automatic statutory petition eligibility.
 - **Local verification is not automated.** Moderators need a reliable independent identity/residency-check process and privacy-safe evidence handling.
 - **Public launch is not yet approved.** Before production, add stronger request throttles, fraud protection, security tests, account recovery, guest-to-account migration, consent and retention policies, account deletion, complaint appeals, backups, abuse monitoring, and a comprehensive accessibility review.
 

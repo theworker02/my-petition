@@ -7,7 +7,7 @@ import {
   Sparkles, ThumbsDown, ThumbsUp, Users, Vote, X
 } from 'lucide-react';
 import { api, categories, number, percentage, relativeDate, type Activity, type Category, type ListResponse, type Position, type Proposal, type ProposalDetail, type Stats, type User } from './api';
-import { SignaturePanel, LocationPanel, SharePanel, SaveButton, ReportButton, NotificationsBell, EmbedPage, ModerationPage } from './features';
+import { SignaturePanel, LocationPanel, SharePanel, SaveButton, ReportButton, NotificationsBell, EmbedPage, ModerationPage, VerifySignaturePage } from './features';
 
 type AuthContextValue = { user: User | null; loading: boolean; openAuth: () => void; logout: () => Promise<void> };
 const AuthContext = createContext<AuthContextValue>({ user: null, loading: true, openAuth: () => {}, logout: async () => {} });
@@ -460,7 +460,7 @@ export default function App() {
   useEffect(() => { let active = true; api<{ user: User | null }>('/session').then(result => { if (active) setUser(result.user); }).catch(() => {}).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
   const logout = async () => { try { await api('/auth/logout', {}); setUser(null); } catch { setUser(null); } };
   return <AuthContext.Provider value={{ user, loading, openAuth: () => setAuthOpen(true), logout }}>
-    <BrowserRouter><ScrollToTop /><div className="app-shell">{!window.location.pathname.startsWith('/embed/')&&<Header/>}<Routes><Route path="/" element={<Home />} /><Route path="/explore" element={<Explore />} /><Route path="/proposal/:slug" element={<ProposalPage />} /><Route path="/create" element={<Create />} /><Route path="/activity" element={<ActivityPage />} /><Route path="/about" element={<About/>}/><Route path="/moderation" element={<ModerationPage/>}/><Route path="/embed/:slug" element={<EmbedPage/>}/><Route path="*" element={<main className="container page-container"><EmptyState filtered /></main>} /></Routes>{!window.location.pathname.startsWith('/embed/')&&<Footer/>}</div></BrowserRouter>
+    <BrowserRouter><ScrollToTop /><div className="app-shell">{!window.location.pathname.startsWith('/embed/')&&<Header/>}<Routes><Route path="/" element={<Home />} /><Route path="/explore" element={<Explore />} /><Route path="/proposal/:slug" element={<ProposalPage />} /><Route path="/create" element={<Create />} /><Route path="/activity" element={<ActivityPage />} /><Route path="/about" element={<About/>}/><Route path="/moderation" element={<ModerationPage/>}/><Route path="/verify-signature" element={<VerifySignaturePage/>}/><Route path="/embed/:slug" element={<EmbedPage/>}/><Route path="*" element={<main className="container page-container"><EmptyState filtered /></main>} /></Routes>{!window.location.pathname.startsWith('/embed/')&&<Footer/>}</div></BrowserRouter>
     {authOpen && <AuthDialog onClose={() => setAuthOpen(false)} onLogin={next => { setUser(next); setAuthOpen(false); }} />}
   </AuthContext.Provider>;
 }

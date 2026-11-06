@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono';
+import { SIGNATURE_CONSENT_TEXT, SIGNATURE_CONSENT_VERSION } from '../shared/signature';
 
 type Bindings = {
   DB: D1Database;
@@ -169,6 +170,26 @@ async function hmacHex(secret:string, data:string) {
   const key=await crypto.subtle.importKey('raw',encoder.encode(secret),'HMAC',false,['sign']);
   return textToHex(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(data))));
 }
+
+type SignatureEvidence = {
+  id:string; proposal_id:string; user_id:string; signer_name:string; signer_email:string;
+  document_hash:string; consent_text:string; consent_version:string; ip_hash:string;
+  user_agent_hash:string; show_name:number; signed_at:string; audit_mac:string|null;
+};
+function signatureEvidencePayload(evidence:SignatureEvidence):string {
+  // Fields are ordered deliberately: changes to any field invalidate the HMAC.
+  return JSON.stringify(['my-petition-signature-evidence-v1', evidence.id, evidence.proposal_id,
+    evidence.user_id,evidence.signer_name,evidence.signer_email,evidence.document_hash,
+    evidence.consent_text,evidence.consent_version,evidence.ip_hash,evidence.user_agent_hash,
+    evidence.show_name,evidence.signed_at]);
+}
+async function signatureIntegrity(secret:string|undefined, evidence:SignatureEvidence):Promise<'valid'|'unsealed'|'mismatch'|'unavailable'> {
+  if(!evidence.audit_mac) return 'unsealed';
+  if(!secret) return 'unavailable';
+  const expected=await hmacHex(secret,signatureEvidencePayload(evidence));
+  return constantTimeMatch(expected,evidence.audit_mac)?'valid':'mismatch';
+}
+
 async function notify(c:Context<AppEnv>,userId:string,proposalId:string,kind:'comment'|'signature'|'moderation'|'verification',message:string) {
   await c.env.DB.prepare('INSERT INTO notifications(id,user_id,proposal_id,kind,message) VALUES(?,?,?,?,?)')
     .bind(crypto.randomUUID(),userId,proposalId,kind,message).run();
@@ -295,18 +316,20 @@ app.get('/api/proposals/:slug', async (c) => {
   if (!p) return c.json({ error: 'Proposal not found.' }, 404);
   const user = await currentUser(c);
   const actor=await getActor(c);
-  const [myVote, participantRows, commentRows] = await Promise.all([
+  const [myVote, participantRows, commentRows, publicSigners] = await Promise.all([
     actor ? c.env.DB.prepare('SELECT stance,show_name,public_name FROM votes WHERE proposal_id=? AND user_id=?').bind(p.id, actor.id).first<{ stance: string; show_name: number;public_name:string|null }>() : Promise.resolve(null),
     c.env.DB.prepare("SELECT v.stance, CASE WHEN v.show_name=1 THEN COALESCE(NULLIF(v.public_name,''),u.display_name) ELSE NULL END AS display_name FROM votes v JOIN users u ON u.id=v.user_id WHERE v.proposal_id=? ORDER BY v.updated_at DESC LIMIT 14")
       .bind(p.id).all<{ stance: string; display_name: string | null }>(),
     c.env.DB.prepare("SELECT x.id,x.body,x.created_at,COALESCE(NULLIF(x.public_name,''),u.display_name) AS display_name FROM comments x JOIN users u ON u.id=x.user_id WHERE x.proposal_id=? AND x.visibility='visible' ORDER BY x.created_at DESC LIMIT 40")
-      .bind(p.id).all<{ id: string; body: string; created_at: string; display_name: string }>()
+      .bind(p.id).all<{ id: string; body: string; created_at: string; display_name: string }>(),
+    c.env.DB.prepare('SELECT signer_name AS display_name, signed_at FROM signatures WHERE proposal_id=? AND show_name=1 ORDER BY signed_at DESC LIMIT 12')
+      .bind(p.id).all<{display_name:string;signed_at:string}>()
   ]);
   const signature=actor ? await c.env.DB.prepare('SELECT id FROM signatures WHERE proposal_id=? AND user_id=?').bind(p.id,actor.id).first<{id:string}>():null;
   const email=actor?await verifiedEmail(c,actor.id):null;
   const local=actor?await locationVerification(c,actor.id):null;
   const saved=user?await c.env.DB.prepare('SELECT user_id FROM saved_proposals WHERE user_id=? AND proposal_id=?').bind(user.id,p.id).first():null;
-  return c.json({ proposal: formatProposal(p), isAuthor: actor?.id === p.author_id, myVote: myVote ?? null, mySignature: Boolean(signature), emailVerified: Boolean(email), verifiedEmail: email?.email ?? null, locationVerification: local ?? null, saved: Boolean(saved), participants: participantRows.results ?? [], comments: commentRows.results ?? [] });
+  return c.json({ proposal: formatProposal(p), isAuthor: actor?.id === p.author_id, myVote: myVote ?? null, mySignature: Boolean(signature), emailVerified: Boolean(email), verifiedEmail: email?.email ?? null, locationVerification: local ?? null, saved: Boolean(saved), participants: participantRows.results ?? [], comments: commentRows.results ?? [], publicSigners:publicSigners.results??[] });
 });
 
 app.post('/api/proposals', async (c) => {
@@ -507,30 +530,64 @@ app.post('/api/proposals/:slug/sign', async (c) => {
   const showName=input.showName===true;
   if(signerName.length<2||signerName.length>120) return c.json({error:'Enter your full legal name (2–120 characters).'},400);
   if(input.consent!==true) return c.json({error:'Explicit consent to sign the petition electronically is required.'},400);
-  const consentText='I intend to electronically sign this petition exactly as presented, using my typed name. I understand this creates an auditable record and is not automatically a government-recognized petition signature.';
+  const consentText=SIGNATURE_CONSENT_TEXT;
   const documentHash=await sha256(JSON.stringify({id:p.id,slug:p.slug,title:p.title,description:p.description,kind:p.kind,created_at:p.created_at,consentText}));
   const ip=c.req.header('CF-Connecting-IP')??'unavailable';
   const ua=(c.req.header('User-Agent')??'unavailable').slice(0,500);
-  const id=crypto.randomUUID();
+  const signedAt=new Date().toISOString();
+  const evidence:SignatureEvidence={
+    id:crypto.randomUUID(),proposal_id:p.id,user_id:actor.id,signer_name:signerName,
+    signer_email:verified.email,document_hash:documentHash,consent_text:consentText,
+    consent_version:SIGNATURE_CONSENT_VERSION,
+    ip_hash:await hmacHex(c.env.AUDIT_HASH_SECRET,ip),
+    user_agent_hash:await sha256(ua),show_name:showName?1:0,signed_at:signedAt,audit_mac:null
+  };
+  const integrityMac=await hmacHex(c.env.AUDIT_HASH_SECRET,signatureEvidencePayload(evidence));
   try{
-    await c.env.DB.prepare('INSERT INTO signatures(id,proposal_id,user_id,signer_name,signer_email,document_hash,consent_text,consent_version,ip_hash,user_agent_hash,show_name) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
-      .bind(id,p.id,actor.id,signerName,verified.email,documentHash,consentText,'2026-11-v1',await hmacHex(c.env.AUDIT_HASH_SECRET,ip),await sha256(ua),showName?1:0).run();
+    await c.env.DB.prepare('INSERT INTO signatures(id,proposal_id,user_id,signer_name,signer_email,document_hash,consent_text,consent_version,ip_hash,user_agent_hash,show_name,signed_at,audit_mac) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(evidence.id,p.id,actor.id,signerName,verified.email,documentHash,consentText,SIGNATURE_CONSENT_VERSION,evidence.ip_hash,evidence.user_agent_hash,evidence.show_name,signedAt,integrityMac).run();
   }catch{
     return c.json({error:'This participant or verified email has already signed this petition. Signatures are not duplicated.'},409);
   }
   await announce(c,p,actor.id,'signature','A new electronic signature was added to a petition you follow.');
-  return c.json({signed:true,receiptId:id,documentHash,signatureMethod:'typed-name-with-verified-email',notice:'An electronic signature is recorded with audit evidence. Legal recognition depends on the applicable petition rules.'},201);
+  return c.json({signed:true,receiptId:evidence.id,documentHash,signatureMethod:'typed-name-with-verified-email',integrity:'sealed',notice:'An electronic signature has been recorded with an integrity seal. Legal recognition depends on applicable petition rules.'},201);
 });
 app.get('/api/proposals/:slug/signature-receipt', async (c) => {
   const actor=await getActor(c);
   if(!actor) return c.json({error:'An active signer session is required.'},401);
   const p=await fetchProposal(c,c.req.param('slug'));
   if(!p) return c.json({error:'Petition not found.'},404);
-  const receipt=await c.env.DB.prepare('SELECT id,signer_name,signer_email,document_hash,consent_text,consent_version,signed_at FROM signatures WHERE proposal_id=? AND user_id=?')
-    .bind(p.id,actor.id).first();
-  if(!receipt) return c.json({error:'No signature receipt exists for this participant.'},404);
-  return c.json({receipt,petition:{title:p.title,slug:p.slug,created_at:p.created_at},recordType:'Electronic signature evidence — not a statutory certification'});
+  const evidence=await c.env.DB.prepare('SELECT * FROM signatures WHERE proposal_id=? AND user_id=?')
+    .bind(p.id,actor.id).first<SignatureEvidence>();
+  if(!evidence) return c.json({error:'No signature receipt exists for this participant.'},404);
+  const integrity=await signatureIntegrity(c.env.AUDIT_HASH_SECRET,evidence);
+  return c.json({
+    receipt:{id:evidence.id,signer_name:evidence.signer_name,signer_email:evidence.signer_email,document_hash:evidence.document_hash,consent_text:evidence.consent_text,consent_version:evidence.consent_version,signed_at:evidence.signed_at},
+    integrity,verificationPath:'/verify-signature?id='+encodeURIComponent(evidence.id),
+    petition:{title:p.title,slug:p.slug,created_at:p.created_at},
+    recordType:'Electronic signature evidence — not a statutory certification'
+  });
 });
+
+// Public proof check: only a random receipt ID and non-identifying evidence are exposed.
+// The site operator controls its secret, so this is tamper evidence, not independent certification.
+app.get('/api/signatures/:id/verify',async c=>{
+  const id=c.req.param('id');
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+    return c.json({error:'Invalid receipt identifier.'},400);
+  const row=await c.env.DB.prepare("SELECT s.*,p.slug AS proposal_slug,p.visibility AS proposal_visibility FROM signatures s JOIN proposals p ON p.id=s.proposal_id WHERE s.id=?")
+    .bind(id).first<SignatureEvidence & {proposal_slug:string;proposal_visibility:string}>();
+  if(!row || row.proposal_visibility!=='visible') return c.json({error:'Signature record not found.'},404);
+  const integrity=await signatureIntegrity(c.env.AUDIT_HASH_SECRET,row);
+  if(integrity==='unavailable') return c.json({error:'The verification service is temporarily unavailable.'},503);
+  return c.json({
+    receiptId:id,integrity,verified:integrity==='valid',documentHash:row.document_hash,
+    signedAt:row.signed_at,proposalSlug:row.proposal_slug,
+    identityVerified:false,legallyCertified:false,
+    notice:'This confirms integrity of a record held by My Petition, not a signers legal identity or eligibility.'
+  });
+});
+
 app.post('/api/proposals/:slug/save', async (c) => {
   const account=await currentUser(c);
   if(!account) return c.json({error:'Create an account or log in to save petitions.'},401);

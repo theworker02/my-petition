@@ -4,12 +4,33 @@
  * Uses only Node.js built-ins and never calls external email providers.
  */
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { spawn, execFileSync } from 'node:child_process';
+import { randomUUID,randomBytes,createHash } from 'node:crypto';
+import { writeFileSync,unlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const port=8789;
 const origin='http://127.0.0.1:'+port;
-const worker=spawn('node_modules/.bin/wrangler',['dev','--local','--port',String(port),'--ip','127.0.0.1'],{
+// Synthetic, pre-verified account for integration-testing the signing subsystem.
+// This bypasses sending actual email in CI and does not create a real user.
+const signerId=randomUUID();
+const signerEmail='smoke-signer-'+signerId+'@example.test';
+const signerToken=randomBytes(32).toString('hex');
+const signerCookie='mp_session='+signerToken;
+const tokenHash=createHash('sha256').update(signerToken).digest('hex');
+const expires=new Date(Date.now()+3600000).toISOString();
+const seedSql=[
+  "INSERT INTO users(id,email,display_name,password_hash,password_salt,is_guest) VALUES ('"+signerId+"','"+signerEmail+"','Signature Test Account','!test-account-disabled','test-salt',0);",
+  "INSERT INTO verified_emails(user_id,email) VALUES ('"+signerId+"','"+signerEmail+"');",
+  "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES ('"+tokenHash+"','"+signerId+"','"+expires+"');"
+].join('\n');
+const seedFile=join(tmpdir(),'my-petition-smoke-'+signerId+'.sql');
+writeFileSync(seedFile,seedSql);
+try{
+  execFileSync('node_modules/.bin/wrangler',['d1','execute','my-petition-db','--local','--file',seedFile],{stdio:'pipe',timeout:45000});
+}finally{unlinkSync(seedFile);}
+const worker=spawn('node_modules/.bin/wrangler',['dev','--local','--port',String(port),'--ip','127.0.0.1','--var','AUDIT_HASH_SECRET:my-petition-smoke-only-secret-key'],{
   stdio:['ignore','pipe','pipe'],detached:true
 });
 let output='';
@@ -95,6 +116,33 @@ async function run(){
   assert.equal(details.data.proposal.oppose_count,1);
   assert.equal(details.data.participants[0].display_name,'Example Voter');
 
+  // Traceable e-signatures are a separate operation from advisory votes.
+  const missingConsent=await request(detailPath+'/sign',{method:'POST',cookie:signerCookie,body:{signerName:'Demo Verified Signer',consent:false,showName:true}});
+  status(missingConsent,400,'E-signature requires explicit consent');
+  const signed=await request(detailPath+'/sign',{method:'POST',cookie:signerCookie,body:{signerName:'Demo Verified Signer',consent:true,showName:true}});
+  status(signed,201,'Verified-email signature with evidence seal');
+  assert.ok(signed.data.receiptId);
+  assert.equal(signed.data.integrity,'sealed');
+  const checked=await request('/api/signatures/'+signed.data.receiptId+'/verify');
+  status(checked,200,'Public receipt integrity verification');
+  assert.equal(checked.data.verified,true);
+  assert.equal(checked.data.integrity,'valid');
+  assert.equal(checked.data.documentHash,signed.data.documentHash);
+  assert.equal(checked.data.identityVerified,false);
+  assert.ok(!JSON.stringify(checked.data).includes(signerEmail),'Private signer email is never returned by public verification');
+  assert.ok(!JSON.stringify(checked.data).includes('Demo Verified Signer'),'Private signer name is never returned by public verification');
+  const receipt=await request(detailPath+'/signature-receipt',{cookie:signerCookie});
+  status(receipt,200,'Private signer's receipt');
+  assert.equal(receipt.data.integrity,'valid');
+  assert.equal(receipt.data.receipt.signer_email,signerEmail);
+  details=await request(detailPath);
+  assert.equal(details.data.proposal.signature_count,1);
+  assert.equal(details.data.publicSigners.length,1);
+  assert.equal(details.data.publicSigners[0].display_name,'Demo Verified Signer');
+  status(await request(detailPath+'/sign',{method:'POST',cookie:signerCookie,body:{signerName:'Demo Verified Signer',consent:true,showName:true}}),409,'Duplicate e-signature rejected');
+  status(await request('/api/signatures/not-a-uuid/verify'),400,'Invalid receipt ID rejected');
+  status(await request('/api/signatures/'+randomUUID()+'/verify'),404,'Unknown receipt rejected');
+
   const comment=await request(detailPath+'/comments',{method:'POST',cookie:created.cookie,body:{body:'Please consider accessibility too.',publicName:'Example Organizer'}});
   status(comment,201,'Guest public comment');
   details=await request(detailPath,{cookie:created.cookie});
@@ -138,7 +186,7 @@ async function run(){
   details=await request(detailPath);
   assert.equal(details.data.proposal.is_open,false);
   status(await request(detailPath+'/vote',{method:'POST',cookie:created.cookie,body:{stance:'support',showName:false}}),409,'Closed petition blocks new votes');
-  console.log('PASS: 23 API assertions and end-to-end guest, vote, signature gate, moderation, local eligibility, saved proposal, logout, and closure workflows.');
+  console.log('PASS: API smoke checks for guest participation, support/oppose votes, private receipt integrity, opt-in signer names, moderation, local restrictions, account saves and proposal closure.');
 }
 try{await run();}
 catch(error){console.error(error);console.error('Last Worker output:\n'+output.slice(-3500));process.exitCode=1;}

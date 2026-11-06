@@ -16,6 +16,7 @@ export type ProposalDetail = {
   locationVerification: {locality:string;region:string;postal_code:string;status:'pending'|'verified'|'rejected'}|null;
   myVote: {stance:Position;show_name:number;public_name:string|null}|null;
   participants: Array<{ stance: Position; display_name: string | null }>;
+  publicSigners: Array<{display_name:string;signed_at:string}>;
   comments: Array<{ id: string; body: string; created_at: string; display_name: string }>;
 };
 export type Stats = { proposals: number; votes: number; participants: number };

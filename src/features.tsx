@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useLocation } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, BadgeCheck, Bell, Bookmark, Check, CheckCircle2, ClipboardCopy, Download, FileSignature, Flag, Globe, MailCheck, MapPin, Share2, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { api, number, percentage, type Proposal, type ProposalDetail } from './api';
+import { SIGNATURE_CONSENT_TEXT } from '../shared/signature';
 
 export type Verification = { verifiedEmail: string | null; location: { locality: string; region: string; postal_code: string; status: 'pending'|'verified'|'rejected' } | null; guest: boolean };
 export function EmailVerification({ initialEmail, onVerified }: { initialEmail?: string | null; onVerified: () => void }) {
@@ -44,7 +45,7 @@ export function SignaturePanel({ detail, reload }: {detail:ProposalDetail;reload
   const [consent,setConsent]=useState(false);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
-  const [receipt,setReceipt]=useState<null|Record<string,unknown>>(null);
+  const [receipt,setReceipt]=useState<null|{receipt:{id:string;signer_name:string;signer_email:string};verificationPath:string;integrity:string}>(null);
   if(p.kind!=='petition') return null;
   const sign=async(e:FormEvent)=>{
     e.preventDefault();setBusy(true);setMessage('');
@@ -56,7 +57,7 @@ export function SignaturePanel({ detail, reload }: {detail:ProposalDetail;reload
   const receiptAction=async(download:boolean)=>{
     setMessage('');
     try{
-      const data=await api<Record<string,unknown>>('/proposals/'+encodeURIComponent(p.slug)+'/signature-receipt');
+      const data=await api<{receipt:{id:string;signer_name:string;signer_email:string};verificationPath:string;integrity:string}>('/proposals/'+encodeURIComponent(p.slug)+'/signature-receipt');
       setReceipt(data);
       if(download){
         const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
@@ -72,22 +73,23 @@ export function SignaturePanel({ detail, reload }: {detail:ProposalDetail;reload
     {detail.mySignature ? <>
       <div className="feature-success"><CheckCircle2 size={19}/> You've already signed this petition.</div>
       <button className="button button-outline button-block" onClick={()=>void receiptAction(true)}><Download size={16}/> Download your signature receipt</button>
-      {receipt && <p className="small-disclaimer">Receipt contains your signed name, email and petition fingerprint. Keep it private.</p>}
+      {receipt && <div className="receipt-options"><Link className="text-link" to={receipt.verificationPath}><BadgeCheck size={17}/> Verify integrity of receipt</Link><p className="small-disclaimer">Your private receipt includes your signed name and email. Public verification returns only the record's integrity status and no personal information.</p></div>}
     </> : p.is_open ? <>
       {!expanded ? <button className="button button-primary button-block" onClick={()=>setExpanded(true)}>Electronically sign <FileSignature size={17}/></button> : <>
         {!detail.emailVerified ? <EmailVerification initialEmail={detail.verifiedEmail} onVerified={()=>void reload()}/> : <form className="signature-form" onSubmit={e=>void sign(e)}>
           <p className="verified-email"><BadgeCheck size={17}/> Verified email: {detail.verifiedEmail}</p>
           <label htmlFor="signer-name">Your full legal name</label><input id="signer-name" type="text" autoComplete="name" minLength={2} maxLength={120} placeholder="Type your full legal name" required value={name} onChange={e=>setName(e.target.value)}/>
           <div className="signed-preview"><span>Electronic signature preview</span><strong>{name||'Your full name'}</strong></div>
-          <label className="feature-checkbox"><input type="checkbox" checked={showName} onChange={e=>setShowName(e.target.checked)}/> Show my name publicly as a signer</label>
-          <label className="feature-checkbox consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} required/> I intend to electronically sign this petition exactly as presented using my typed name. I consent to storing the signature and its private audit evidence.</label>
+          <label className="feature-checkbox"><input type="checkbox" checked={showName} onChange={e=>setShowName(e.target.checked)}/> Show my <strong>full legal name</strong> publicly in this petition's signer list (optional).</label>
+          <label className="feature-checkbox consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} required/> {SIGNATURE_CONSENT_TEXT}</label>
           <button disabled={busy||!consent} className="button button-primary button-block" type="submit">{busy?'Signing...':'Confirm electronic signature'} <Check size={17}/></button>
         </form>}
         <button className="linklike" onClick={()=>setExpanded(false)}>Cancel signing</button>
       </>}
     </> : <p className="small-disclaimer">Signing has closed for this petition.</p>}
+    {detail.publicSigners.length>0 && <div className="signer-directory"><h4>Signers who chose to be public</h4>{detail.publicSigners.map((person,i)=><div className="signer-entry" key={i}><BadgeCheck size={16}/><span>{person.display_name}</span><time>{new Date(person.signed_at).toLocaleDateString()}</time></div>)}</div>}
     {message&&<p role="status" className="feature-notice">{message}</p>}
-    <p className="small-disclaimer"><ShieldCheck size={14}/> Signatures record consent, document hash, timestamp, verified email, and hashed connection metadata. This does not guarantee eligibility as a statutory petition signature.</p>
+    <p className="small-disclaimer"><ShieldCheck size={14}/> Signature records include consent, a document fingerprint, timestamp, verified email, and protected audit metadata. The integrity check is not independent identity validation or statutory certification.</p>
   </section>;
 }
 
@@ -201,4 +203,53 @@ export function ModerationPage(){
   const handleReport=async(id:string,action:string)=>{try{await api('/moderation/reports/'+id,{action});await load();}catch(e){setMessage((e as Error).message);}};
   const handleLocation=async(id:string,action:string)=>{try{await api('/moderation/locations/'+id,{action,method,evidenceReference:refs[id]??''});await load();}catch(e){setMessage((e as Error).message);}};
   return <main className="container page-container moderation-page"><h1>Moderation queue</h1><p>Access requires a verified email included in the server's moderator allowlist. Do not approve residency without independently checked evidence.</p>{message&&<p className="feature-notice">{message}</p>}{data&&<><h2>Content reports ({data.reports.length})</h2>{data.reports.map(r=><article className="moderation-card" key={r.id}><strong>{r.reason}: {r.target_type}</strong><p>{r.details||'No details submitted.'}</p><small>{r.target_id} · {r.created_at}</small><div><button className="button button-outline" onClick={()=>void handleReport(r.id,'dismiss')}>Dismiss</button><button className="button button-primary" onClick={()=>void handleReport(r.id,'hide')}>Hide content</button></div></article>)}<h2>Local verification requests ({data.locations.length})</h2>{data.locations.map(r=><article className="moderation-card" key={r.user_id}><strong>{r.locality}, {r.region} {r.postal_code}</strong><p>Verified email: {r.email}. Location is still self-reported.</p><label>Independent verification method <select value={method} onChange={e=>setMethod(e.target.value)}><option value="manual-address-review">Manual address review</option><option value="trusted-provider">Trusted external provider</option><option value="mailed-code">Postal mail code</option></select></label><label>Evidence reference (internal only) <input value={refs[r.user_id]??''} placeholder="Verified evidence reference, at least 8 characters" onChange={e=>setRefs(s=>({...s,[r.user_id]:e.target.value}))}/></label><div><button className="button button-outline" onClick={()=>void handleLocation(r.user_id,'reject')}>Reject</button><button className="button button-primary" onClick={()=>void handleLocation(r.user_id,'verify')}>Approve verified</button></div></article>)}</>}</main>;
+}
+
+
+type VerificationResult = {
+  receiptId:string;integrity:'valid'|'unsealed'|'mismatch';verified:boolean;
+  documentHash:string;signedAt:string;proposalSlug:string;
+  identityVerified:boolean;legallyCertified:boolean;notice:string;
+};
+export function VerifySignaturePage(){
+  const {search}=useLocation();
+  const initialId=new URLSearchParams(search).get('id')??'';
+  const [id,setId]=useState(initialId);
+  const [result,setResult]=useState<VerificationResult|null>(null);
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState(false);
+  async function check(receiptId:string){
+    setBusy(true);setError('');setResult(null);
+    try{
+      const data=await api<VerificationResult>('/signatures/'+encodeURIComponent(receiptId.trim())+'/verify');
+      setResult(data);
+    }catch(e){setError((e as Error).message);}
+    finally{setBusy(false);}
+  }
+  useEffect(()=>{if(initialId)void check(initialId);},[initialId]);
+  return <main className="container page-container">
+    <div className="verification-page">
+      <div className="eyebrow"><span className="eyebrow-line"/> SIGNATURE INTEGRITY</div>
+      <h1>Verify a signature <span>receipt.</span></h1>
+      <p>Check whether an electronic signature record has a matching integrity seal in My Petition. You only need the receipt ID. No signer names, email addresses or private audit metadata are exposed here.</p>
+      <form className="inline-form" onSubmit={e=>{e.preventDefault();void check(id);}}>
+        <label htmlFor="receipt-id">Receipt identifier</label>
+        <input id="receipt-id" autoComplete="off" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value={id} onChange={e=>setId(e.target.value)} required maxLength={64}/>
+        <button className="button button-primary" disabled={busy||!id.trim()} type="submit">{busy?'Verifying...':'Verify receipt'} <ArrowRight size={18}/></button>
+      </form>
+      {error&&<div className="verification-result error" role="alert"><X size={23}/><div><strong>Could not verify this receipt</strong><p>{error}</p></div></div>}
+      {result&&<div className={'verification-result '+(result.verified?'valid':'warning')} role="status">
+        {result.verified?<CheckCircle2 size={27}/>:<AlertTriangle size={27}/>}
+        <div><strong>{result.verified?'Integrity seal verified':'Integrity seal not verified'}</strong>
+          <p>{result.verified?'The stored evidence matches the server-generated seal. This record has not been detectably altered since it was sealed.':result.integrity==='unsealed'?'This record predates integrity sealing. Its contents have not been cryptographically verified.':'The stored evidence does not match the integrity seal. Do not rely on this record.'}</p>
+          <dl className="verification-details">
+            <dt>Recorded at</dt><dd>{new Date(result.signedAt).toLocaleString()}</dd>
+            <dt>Petition</dt><dd><Link to={'/proposal/'+result.proposalSlug}>View petition <ArrowRight size={14}/></Link></dd>
+            <dt>Document fingerprint</dt><dd><code>{result.documentHash}</code></dd>
+          </dl>
+        </div>
+      </div>}
+      <p className="verification-warning"><ShieldCheck size={18}/> This check is performed by My Petition, which also controls the signing records and sealing secret. It does not independently establish the signer's identity, residency, consent, or legal eligibility.</p>
+    </div>
+  </main>;
 }
