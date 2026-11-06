@@ -13,7 +13,8 @@
     "db:remote": "wrangler d1 migrations apply my-petition-db --remote",
     "deploy": "npm run build && wrangler deploy",
     "test:smoke": "node scripts/smoke-test.mjs",
-    "release:prepare": "node scripts/prepare-production.mjs"
+    "release:prepare": "node scripts/prepare-production.mjs",
+    "test:release-config": "node scripts/test-production-config.mjs"
   },
   "dependencies": {
     "hono": "^4.10.0",
