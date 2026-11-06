@@ -7,7 +7,7 @@ import {
   Sparkles, ThumbsDown, ThumbsUp, Users, Vote, X
 } from 'lucide-react';
 import { api, categories, number, percentage, relativeDate, type Activity, type Category, type ListResponse, type Position, type Proposal, type ProposalDetail, type Stats, type User } from './api';
-import { EmailVerification, SignaturePanel, LocationPanel, SharePanel, SaveButton, ReportButton, NotificationsBell, EmbedPage, ModerationPage } from './features';
+import { SignaturePanel, LocationPanel, SharePanel, SaveButton, ReportButton, NotificationsBell, EmbedPage, ModerationPage } from './features';
 
 type AuthContextValue = { user: User | null; loading: boolean; openAuth: () => void; logout: () => Promise<void> };
 const AuthContext = createContext<AuthContextValue>({ user: null, loading: true, openAuth: () => {}, logout: async () => {} });
