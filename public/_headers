@@ -20,3 +20,9 @@
 /reset-password*
   X-Robots-Tag: noindex, nofollow
   Referrer-Policy: no-referrer
+
+# Embeddable petition summaries are read-only; allow them to be framed externally.
+/embed/*
+  ! X-Frame-Options
+  X-Robots-Tag: noindex
+  Referrer-Policy: no-referrer
