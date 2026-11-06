@@ -1,0 +1,4 @@
+# Optional, recommended before allowing public registration.
+# TURNSTILE_SECRET=replace-with-cloudflare-turnstile-secret
+# Set the matching public site key in TURNSTILE_SITE_KEY.
+# TURNSTILE_SITE_KEY=replace-with-cloudflare-turnstile-site-key
