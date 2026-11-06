@@ -1,0 +1,92 @@
+/* My Petition 0.2 — guest participation, signatures, sharing and review */
+.detail-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:-6px 0 22px}
+.save-button{background:#f0edff;color:#6751dc;border:1px solid #e5ddff;box-shadow:none;padding:12px 16px}
+.save-button.is-saved{background:#6c52f6;color:#fff;border-color:#6c52f6}
+.report-trigger{display:inline-flex;align-items:center;gap:5px;font-weight:700;color:#9296a8;border:0;background:none;padding:8px;font-size:11px;border-radius:8px}
+.report-trigger:hover{background:#fff0ed;color:#be616b}
+.local-status-banner{display:flex;align-items:flex-start;gap:9px;padding:13px 15px;color:#6556ae;background:#f3f0ff;border-radius:12px;font-size:12px;line-height:1.6;margin:10px 0 20px}
+.guest-name-input{background:white;border:1px solid #e0e3ed;border-radius:11px;padding:12px 14px;color:#303449;font-size:12px;width:100%;margin:0 0 10px}
+.guest-name-input:focus{border-color:#9484eb}
+.vote-name{margin:0}
+.feature-panel{background:white;border:1px solid #e6e8f0;border-radius:20px;padding:24px;margin-top:18px;box-shadow:var(--shadow)}
+.feature-heading{display:flex;align-items:flex-start;gap:12px;margin-bottom:17px}
+.feature-icon{width:43px;height:43px;border-radius:13px;color:#6d51ec;background:#f0edff;display:grid;place-items:center;flex:none}
+.feature-heading h3{margin:3px 0 6px;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;letter-spacing:-.5px}
+.feature-heading p{color:#989cac;font-size:11px;line-height:1.7;margin:0}
+.signature-count{display:flex;align-items:baseline;gap:8px;background:#f7f5ff;border:1px solid #e9e3ff;border-radius:12px;padding:12px 14px;margin-bottom:17px}
+.signature-count strong{font-size:25px;letter-spacing:-1px;color:#6552c9}
+.signature-count span{color:#8e88a6;font-size:11px;flex:1}
+.signature-count svg{color:#34a989;align-self:center}
+.feature-success{display:flex;align-items:center;gap:9px;background:#eaf9f2;color:#279675;font-size:12px;border-radius:10px;padding:12px;font-weight:800;margin-bottom:15px;line-height:1.6}
+.small-disclaimer{color:#9ba0b0;font-size:10px;line-height:1.7;margin:15px 0 0}
+.small-disclaimer svg{vertical-align:-3px;margin-right:3px}
+.feature-notice{font-size:11px;color:#6d5ab4;background:#f3f0ff;border:1px solid #ebe5fd;padding:10px 12px;border-radius:9px;line-height:1.65;margin-top:11px}
+.feature-panel .button{min-height:43px}
+.verify-widget{background:#fcfbff;border:1px solid #e5dfff;border-radius:12px;padding:15px;margin:11px 0}
+.verify-intro{display:flex;align-items:start;gap:10px}
+.verify-intro>svg{color:#6d51ed;flex:none}
+.verify-intro strong{font-size:12px}
+.verify-intro p{font-size:11px;color:#8d92a4;line-height:1.6;margin:4px 0 13px}
+.inline-form{display:flex;flex-direction:column;gap:9px}
+.inline-form label,.signature-form>label:not(.feature-checkbox){font-size:11px;font-weight:800;color:#656a7d}
+.inline-form input,.inline-form select,.inline-form textarea,.signature-form input[type=text],.moderation-card input,.moderation-card select{width:100%;background:white;border:1px solid #dde1ea;border-radius:10px;min-height:43px;padding:10px 12px;color:#34394d;font-size:12px}
+.inline-form textarea{resize:vertical;line-height:1.6}
+.inline-form .button{margin-top:5px}
+.linklike{color:#6a55df;background:none;border:0;text-decoration:underline;text-underline-offset:2px;font-size:11px;font-weight:700;padding:10px 0;cursor:pointer}
+.signature-form{display:flex;flex-direction:column;gap:12px;margin-top:13px}
+.signature-form .verified-email{margin:0;background:#f0fbf5;padding:10px 12px;border-radius:9px;color:#258f71;font-size:11px;line-height:1.7;overflow-wrap:anywhere}
+.signature-form .verified-email svg{vertical-align:-4px;margin-right:4px}
+.signed-preview{border:1px dashed #c4b7f3;border-radius:11px;background:linear-gradient(120deg,#faf8ff,#f4f0ff);min-height:95px;display:flex;justify-content:center;align-items:center;flex-direction:column;gap:6px;padding:16px}
+.signed-preview span{font-size:10px;color:#9b92b8}
+.signed-preview strong{font-size:25px;font-family:cursive;color:#514290;line-height:1.4;word-break:break-word;text-align:center;font-weight:500}
+.feature-checkbox{display:flex;align-items:flex-start;gap:9px;color:#575e72;font-size:11px;font-weight:700;line-height:1.65;cursor:pointer}
+.feature-checkbox input{width:17px;height:17px;accent-color:#6c52f6;flex:none;margin-top:2px}
+.feature-checkbox.consent{background:#f5f4f9;border-radius:10px;padding:11px;font-weight:600;color:#686d7e}
+.local-stat{font-size:11px;color:#5e69a4;font-weight:800;background:#f4f5fd;border-radius:10px;padding:10px}
+.pending-note{font-size:11px;color:#9a7842;background:#fff8ea;border-radius:10px;padding:11px;line-height:1.7}
+.share-buttons{display:flex;gap:8px;flex-wrap:wrap}
+.share-buttons .button{font-size:11px;padding:10px 11px}
+.feature-modal-backdrop{position:fixed;inset:0;z-index:110;background:rgba(23,22,54,.65);backdrop-filter:blur(5px);display:grid;place-items:center;padding:18px}
+.feature-modal{background:white;border-radius:20px;box-shadow:0 24px 80px rgba(12,13,40,.25);padding:30px;position:relative;width:min(440px,100%);max-height:calc(100dvh - 36px);overflow:auto}
+.feature-modal>svg{color:#e19b7c}
+.feature-modal h2{font-size:23px;font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-.8px;margin:14px 0 6px}
+.feature-modal>p{font-size:12px;color:#8b90a0;line-height:1.7}
+.feature-close{position:absolute;right:14px;top:14px;display:grid;place-items:center;background:#f5f5fa;color:#888da0;width:32px;height:32px;border:0;border-radius:9px}
+.notification-container{position:relative}
+.notification-bell{position:relative}
+.notification-dot{width:8px;height:8px;position:absolute;top:4px;right:4px;background:#f08d83;border-radius:50%;border:2px solid white}
+.notifications-popover{position:absolute;right:-10px;top:46px;width:320px;max-height:390px;overflow:auto;border-radius:16px;background:white;box-shadow:0 15px 50px rgba(29,25,88,.2);border:1px solid #e6e8f0;z-index:70}
+.notifications-title{padding:16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e7e8f0}
+.notifications-title strong{font-size:14px}
+.notifications-title button{border:0;background:none;color:#9499a8}
+.notifications-empty{padding:21px;color:#969bad;font-size:12px;line-height:1.65}
+.notification-item{display:flex;align-items:flex-start;gap:10px;padding:14px 16px;border-bottom:1px solid #f0f1f4;color:#606579;font-size:11px;line-height:1.5}
+.notification-item:hover{background:#f8f6ff}
+.notification-item>span:first-child{color:#7160d9}
+.notification-item small{display:block;color:#abaebd;margin-top:5px}
+.guest-activity-note{background:#f1efff;border:1px solid #e5dfff;border-radius:15px;padding:16px;display:flex;align-items:flex-start;gap:12px;color:#6956d5;margin:0 0 30px}
+.guest-activity-note b{font-size:12px}
+.guest-activity-note p{font-size:11px;line-height:1.75;color:#8e89aa;margin:4px 0 0}
+.local-creation{margin-top:22px;background:#f4f0ff;border:1px solid #e8dfff;padding:13px;border-radius:12px}
+.locality-inputs{padding:3px 0 13px}
+.locality-inputs p{margin:11px 0 0;font-size:11px;color:#959aab}
+.embed-page{min-height:100vh;display:grid;place-items:center;padding:14px;background:transparent}
+.embed-card{width:min(100%,480px);padding:20px;border:1px solid #e5e7ef;background:#fff;border-radius:17px;box-shadow:0 6px 18px rgba(38,39,66,.06)}
+.embed-logo{display:flex;gap:7px;align-items:center;color:#6f58df;font-size:12px;font-weight:800}
+.embed-card h2{font-size:19px;letter-spacing:-.6px;font-family:'Plus Jakarta Sans',sans-serif;line-height:1.4;margin:15px 0 7px}
+.embed-card>p{color:#999cac;font-size:11px}
+.embed-track{width:100%;height:9px;border-radius:100px;overflow:hidden;background:#e99d88;margin:18px 0 10px}
+.embed-track span{display:block;height:100%;border-radius:100px;background:#61c9b1}
+.embed-figures{display:flex;justify-content:space-between;color:#858a9a;font-size:11px;margin-bottom:18px}
+.embed-figures b{color:#4d5367}
+.embed-card .button{width:100%}
+.moderation-page>h1{font-family:'Plus Jakarta Sans',sans-serif;font-size:32px}
+.moderation-page>p{font-size:13px;line-height:1.7;color:#858a9b}
+.moderation-page>h2{margin-top:36px;font-size:22px}
+.moderation-card{background:white;border:1px solid #e6e8f0;border-radius:15px;padding:20px;margin:12px 0}
+.moderation-card strong{font-size:14px}
+.moderation-card p,.moderation-card small{font-size:12px;color:#858a9b;line-height:1.7}
+.moderation-card label{display:block;font-size:12px;font-weight:700;margin:12px 0}
+.moderation-card label input,.moderation-card label select{display:block;margin-top:6px}
+.moderation-card>div{display:flex;gap:11px;margin-top:16px}
+@media(max-width:620px){.feature-panel{padding:19px}.notifications-popover{right:-52px;width:min(310px,calc(100vw - 36px))}.feature-modal{padding:22px}.guest-activity-note{margin:0 0 25px}.share-buttons .button{flex:1}}

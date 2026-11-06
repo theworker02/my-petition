@@ -6,18 +6,21 @@ export type Proposal = {
   location: string; kind: 'petition' | 'poll'; status: 'open' | 'closed';
   author_name: string; closes_at: string | null; created_at: string; is_open: boolean;
   support_count: number; oppose_count: number; comment_count: number;
+  signature_count: number;verified_local_count:number;local_only:number;locality:string;region:string;
+
 };
 export type Position = 'support' | 'oppose';
 export type ProposalDetail = {
   proposal: Proposal;
-  isAuthor: boolean;
-  myVote: { stance: Position; show_name: number } | null;
+  isAuthor:boolean;mySignature:boolean;emailVerified:boolean;verifiedEmail:string|null;saved:boolean;
+  locationVerification: {locality:string;region:string;postal_code:string;status:'pending'|'verified'|'rejected'}|null;
+  myVote: {stance:Position;show_name:number;public_name:string|null}|null;
   participants: Array<{ stance: Position; display_name: string | null }>;
   comments: Array<{ id: string; body: string; created_at: string; display_name: string }>;
 };
 export type Stats = { proposals: number; votes: number; participants: number };
 export type ListResponse = { proposals: Proposal[]; page: number; hasMore: boolean };
-export type Activity = { created: Proposal[]; voted: Proposal[] };
+export type Activity = {created:Proposal[];voted:Proposal[];saved:Proposal[];notifications:Array<{id:string;kind:string;message:string;is_read:number;created_at:string;slug:string|null}>};
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number) { super(message); }

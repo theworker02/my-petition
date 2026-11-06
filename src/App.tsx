@@ -4,9 +4,10 @@ import {
   ArrowLeft, ArrowRight, ArrowUpRight, BarChart3, Check, CheckCircle2,
   ChevronDown, CircleHelp, Compass, Eye, Globe2, Heart, HeartHandshake, Landmark, Leaf,
   LockKeyhole, LogOut, MapPin, Menu, MessageCircle, Plus, Search, Send, ShieldCheck,
-  Sparkles, ThumbsDown, ThumbsUp, UserCircle2, Users, Vote, X
+  Sparkles, ThumbsDown, ThumbsUp, Users, Vote, X
 } from 'lucide-react';
 import { api, categories, number, percentage, relativeDate, type Activity, type Category, type ListResponse, type Position, type Proposal, type ProposalDetail, type Stats, type User } from './api';
+import { EmailVerification, SignaturePanel, LocationPanel, SharePanel, SaveButton, ReportButton, NotificationsBell, EmbedPage, ModerationPage } from './features';
 
 type AuthContextValue = { user: User | null; loading: boolean; openAuth: () => void; logout: () => Promise<void> };
 const AuthContext = createContext<AuthContextValue>({ user: null, loading: true, openAuth: () => {}, logout: async () => {} });
@@ -51,6 +52,7 @@ function Header() {
         <Link className="mobile-nav-create" onClick={() => setMenuOpen(false)} to="/create"><Plus size={17} /> Start a petition</Link>
       </nav>
       <div className="header-actions">
+        <NotificationsBell />
         {user ? <button className="user-menu" onClick={() => { navigate('/activity'); setMenuOpen(false); }} title="My account"><span className="avatar tiny">{user.display_name.charAt(0).toUpperCase()}</span><span className="user-label">{user.display_name.split(' ')[0]}</span></button> :
           <button className="text-button header-signin" onClick={openAuth}>Log in</button>}
         <Link className="button button-primary header-create" to="/create"><Plus size={17} strokeWidth={2.5} /> Create petition</Link>
@@ -240,32 +242,35 @@ function ProposalPage() {
   const [showName, setShowName] = useState(false);
   const [voting, setVoting] = useState(false);
   const [voted, setVoted] = useState(false);
+  const [publicName, setPublicName] = useState('');
+  const [commentName,setCommentName] = useState('');
+  const [saved,setSaved] = useState(false);
+  const [saveNotice,setSaveNotice]=useState('');
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
   const [message, setMessage] = useState('');
-  const reload = async () => { const next = await api<ProposalDetail>('/proposals/' + encodeURIComponent(slug || '')); setData(next); return next; };
+  const reload = async () => {const next = await api<ProposalDetail>('/proposals/' + encodeURIComponent(slug || ''));setData(next);setSaved(next.saved);return next;};
+  const toggleSave=async()=>{if(!user){openAuth();return;}try{const result=await api<{saved:boolean}>('/proposals/'+encodeURIComponent(slug||'')+'/save',{saved:!saved});setSaved(result.saved);setSaveNotice(result.saved?'Added to your saved petitions.':'Removed from saved petitions.');}catch(e){setSaveNotice((e as Error).message);}};
   useEffect(() => {
     let alive = true;
     setLoading(true);
     api<ProposalDetail>('/proposals/' + encodeURIComponent(slug || '')).then(next => {
-      if (alive) { setData(next); setStance(next.myVote?.stance ?? null); setShowName(Boolean(next.myVote?.show_name)); setError(''); setVoted(false); }
+      if (alive) { setData(next); setStance(next.myVote?.stance ?? null); setShowName(Boolean(next.myVote?.show_name));setPublicName(next.myVote?.public_name??'');setSaved(next.saved);setError('');setVoted(false); }
     }).catch(e => { if (alive) setError(e.message); }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [slug, user]);
   const submitVote = async () => {
     if (!stance || !slug) return;
-    if (!user) { openAuth(); return; }
     setVoting(true); setMessage('');
-    try { await api('/proposals/' + encodeURIComponent(slug) + '/vote', { stance, showName }); await reload(); setVoted(true); }
+    try { await api('/proposals/' + encodeURIComponent(slug) + '/vote', { stance, showName,publicName }); await reload(); setVoted(true); }
     catch (e) { setMessage((e as Error).message); }
     finally { setVoting(false); }
   };
   const submitComment = async (e: FormEvent) => {
     e.preventDefault();
-    if (!user) { openAuth(); return; }
     if (!comment.trim() || !slug) return;
     setPosting(true); setMessage('');
-    try { await api('/proposals/' + encodeURIComponent(slug) + '/comments', { body: comment }); setComment(''); await reload(); }
+    try { await api('/proposals/' + encodeURIComponent(slug) + '/comments', {body:comment,publicName:commentName});setComment('');await reload(); }
     catch (e) { setMessage((e as Error).message); }
     finally { setPosting(false); }
   };
@@ -286,20 +291,23 @@ function ProposalPage() {
         <div className={'detail-banner art-' + colors[p.category]}><div className="banner-orbit" /><span className="banner-icon"><CategoryIcon category={p.category} size={55} /></span><span className="banner-badge">{p.kind === 'petition' ? 'PETITION' : 'PUBLIC POLL'}</span></div>
         <div className="detail-meta"><span className="detail-category"><CategoryIcon category={p.category} size={17} /> {p.category}</span><span className={'status-chip ' + (p.is_open ? '' : 'closed')}>{p.is_open ? 'Open for voting' : 'Voting closed'}</span><span className="detail-date">Created {relativeDate(p.created_at)}</span></div>
         <h1 className="detail-title">{p.title}</h1>
+        <div className="detail-actions"><SaveButton saved={saved} onSave={toggleSave}/><ReportButton targetType="proposal" targetId={p.id}/></div>
+        {saveNotice&&<p role="status" className="feature-notice">{saveNotice}</p>}
+        {p.local_only===1&&<p className="local-status-banner"><MapPin size={16}/> Local verification is required for {p.locality}, {p.region} before voting or signing.</p>}
         <div className="creator-row"><span className="avatar">{p.author_name.charAt(0).toUpperCase()}</span><span>Started by <strong>{p.author_name}</strong><small>{p.location ? <><MapPin size={13} /> {p.location}</> : 'Open to everyone'}</small></span></div>
         <div className="detail-body"><h2>About this proposal</h2>{p.description.split(/\n+/).filter(Boolean).map((paragraph, i) => <p key={i}>{paragraph}</p>)}</div>
         <div className="discussion"><div className="discussion-heading"><div><h2>Community discussion</h2><p>Share your perspective. Disagree respectfully.</p></div><span><MessageCircle size={18} /> {p.comment_count}</span></div>
           {message && <ErrorBox message={message} />}
           <form className="comment-form" onSubmit={e => { void submitComment(e); }}>
             <span className="avatar">{user?.display_name.charAt(0).toUpperCase() ?? '?'}</span>
-            <div className="comment-fields"><textarea aria-label="Write a public comment" placeholder={user ? 'Add to the conversation...' : 'Log in to share your perspective...'} value={comment} maxLength={1000} onChange={e => setComment(e.target.value)} onFocus={() => { if (!user) openAuth(); }} rows={3} /><div className="comment-actions"><small>Comments display your chosen account name publicly.</small><button disabled={posting || (Boolean(user) && comment.trim().length < 3)} className="button button-primary" type="submit">{posting ? 'Posting...' : 'Post comment'} <Send size={16} /></button></div></div>
+            <div className="comment-fields">{!user&&<input className="guest-name-input" aria-label="Your public comment display name" placeholder="Your display name (shown with your comment)" required minLength={2} maxLength={60} value={commentName} onChange={e=>setCommentName(e.target.value)}/>}<textarea aria-label="Write a public comment" placeholder="Add your perspective to the conversation..." value={comment} maxLength={1000} onChange={e => setComment(e.target.value)} rows={3} /><div className="comment-actions"><small>Comments show your chosen display name publicly. No account required.</small><button disabled={posting || comment.trim().length < 3 || (!user&&commentName.trim().length<2)} className="button button-primary" type="submit">{posting ? 'Posting...' : 'Post comment'} <Send size={16} /></button></div></div>
           </form>
-          <div className="comment-list">{data.comments.length ? data.comments.map(c => <article className="comment" key={c.id}><span className="avatar">{c.display_name.charAt(0).toUpperCase()}</span><div><div className="comment-author"><strong>{c.display_name}</strong><time>{relativeDate(c.created_at)}</time></div><p>{c.body}</p></div></article>) : <div className="no-comments">No comments yet. You can start the conversation.</div>}</div>
+          <div className="comment-list">{data.comments.length ? data.comments.map(c => <article className="comment" key={c.id}><span className="avatar">{c.display_name.charAt(0).toUpperCase()}</span><div><div className="comment-author"><strong>{c.display_name}</strong><time>{relativeDate(c.created_at)}</time></div><p>{c.body}</p><ReportButton targetType="comment" targetId={c.id}/></div></article>) : <div className="no-comments">No comments yet. You can start the conversation.</div>}</div>
         </div>
       </div>
       <aside className="proposal-sidebar">
         <div className="vote-panel">
-          <div className="vote-panel-head"><span className="live-indicator"><span className="pulse-dot" /> LIVE RESULTS</span><span className="vote-panel-icon"><Vote size={21} /></span></div>
+          <div className="vote-panel-head"><span className="live-indicator"><span className="pulse-dot" /> PARTICIPATION RESULTS</span><span className="vote-panel-icon"><Vote size={21} /></span></div>
           <div className="vote-total"><Count value={total} /><span>{total === 1 ? 'voice so far' : 'voices so far'}</span></div>
           <ResultsBar proposal={p} labels />
           <div className="vote-divider" />
@@ -307,31 +315,34 @@ function ProposalPage() {
           <p className="vote-intro">{data.myVote ? 'You can update your position or name visibility at any time while voting is open.' : 'Every perspective matters. Choose the position you believe in.'}</p>
           {p.is_open ? <>
             <div className="vote-choices"><button className={'vote-choice support-choice' + (stance === 'support' ? ' selected' : '')} onClick={() => setStance('support')} aria-pressed={stance === 'support'}><span><ThumbsUp size={22} /> I support this</span><span className="choice-check">{stance === 'support' && <Check size={17} />}</span></button><button className={'vote-choice oppose-choice' + (stance === 'oppose' ? ' selected' : '')} onClick={() => setStance('oppose')} aria-pressed={stance === 'oppose'}><span><ThumbsDown size={22} /> I oppose this</span><span className="choice-check">{stance === 'oppose' && <Check size={17} />}</span></button></div>
-            <label className="name-choice"><input type="checkbox" checked={showName} onChange={e => setShowName(e.target.checked)} /><span><Eye size={17} /> Show my display name publicly <small>{showName ? 'Your account display name will be visible on this proposal.' : 'Your name will be hidden from other participants.'}</small></span></label>
-            <button disabled={!stance || voting || mineUnchanged} className="button button-primary button-block vote-submit" onClick={() => { void submitVote(); }}>{voting ? 'Submitting...' : !user ? 'Log in to submit' : data.myVote ? 'Update my vote' : 'Submit my vote'} <ArrowRight size={18} /></button>
+            <label className="name-choice"><input type="checkbox" checked={showName} onChange={e => setShowName(e.target.checked)} /><span><Eye size={17}/> Show my display name publicly <small>{showName?'A name will appear alongside your position.':'Your display name stays hidden on this vote.'}</small></span></label>
+            {showName&&!user&&<input className="guest-name-input vote-name" aria-label="Public voting name" minLength={2} maxLength={60} placeholder="Display name (shown publicly)" value={publicName} onChange={e=>setPublicName(e.target.value)}/>} 
+            <button disabled={!stance || voting || mineUnchanged || (showName&&!user&&publicName.trim().length<2)} className="button button-primary button-block vote-submit" onClick={() => { void submitVote(); }}>{voting ? 'Submitting...' : data.myVote ? 'Update my vote' : 'Submit my vote'} <ArrowRight size={18} /></button>
             {voted && <div className="success-note" role="status"><CheckCircle2 size={18} /> Your vote has been recorded.</div>}
           </> : <div className="closed-note"><LockKeyhole size={18} /> This proposal is no longer accepting votes.</div>}
-          <div className="privacy-caption"><ShieldCheck size={17} /><span>Your identity is never published with an anonymous-display vote. Your account is still used to prevent duplicate votes.</span></div>
+          <div className="privacy-caption"><ShieldCheck size={17} /><span>Anonymous-display votes hide your name publicly. Your browser session or account is used to limit repeat voting; guest participation is not proof of unique identity.</span></div>
           {user && data.isAuthor && p.is_open && <button className="close-action" onClick={() => { void close(); }}>Close this proposal</button>}
         </div>
         <div className="participants-panel"><div className="participants-head"><h3>Recent participants</h3><span className="participant-count">{total}</span></div>
           {data.participants.length ? <div className="participant-list">{data.participants.map((part, i) => <div className="participant-row" key={i}><span className={'avatar participant-avatar' + (!part.display_name ? ' anonymous-avatar' : '')}>{part.display_name ? part.display_name.charAt(0).toUpperCase() : <LockKeyhole size={15} />}</span><span className="participant-name">{part.display_name || 'Anonymous participant'}</span><span className={'participant-stance ' + part.stance}>{part.stance === 'support' ? 'Supports' : 'Opposes'}</span></div>)}</div> : <div className="participants-empty">Be the first to participate.</div>}
         </div>
         <div className="sidebar-disclaimer"><CircleHelp size={18} /><span>These are voluntary online responses, not a scientific poll or an official government vote.</span></div>
+        <SignaturePanel detail={data} reload={reload}/>
+        <LocationPanel detail={data} reload={reload}/>
+        <SharePanel proposal={p}/>
       </aside>
     </div>
   </main>;
 }
 function Create() {
-  const { user, openAuth } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ title: '', description: '', category: 'Community', location: '', kind: 'petition', closesAt: '' });
+  const [form, setForm] = useState({title:'',description:'',category:'Community',location:'',kind:'petition',closesAt:'',authorName:'',locality:'',region:'',localOnly:false});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const update = (key: keyof typeof form, value: string) => setForm(f => ({ ...f, [key]: value }));
+  const update = (key: keyof typeof form, value: string|boolean) => setForm(f => ({ ...f, [key]: value }));
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!user) { openAuth(); return; }
     setSaving(true); setError('');
     try {
       const response = await api<{ slug: string }>('/proposals', { ...form, closesAt: form.closesAt ? new Date(form.closesAt).toISOString() : '' });
@@ -345,6 +356,7 @@ function Create() {
     <div className="create-layout">
       <form className="create-form" onSubmit={e => { void submit(e); }}>
         <div className="form-section"><div className="form-number">01</div><div className="form-section-body"><h2>What's your idea?</h2><p>Start with a specific question or change you'd like people to consider.</p>
+          {!user&&<><label className="field-label" htmlFor="creator-name">Public creator name <span>*</span></label><input id="creator-name" className="field-input" minLength={2} maxLength={60} value={form.authorName} onChange={e=>update('authorName',e.target.value)} placeholder="Your name or a pseudonym" required/><div className="field-help">No account needed. This name will appear as the creator.</div></>}
           <label className="field-label" htmlFor="proposal-title">Proposal title <span>*</span></label>
           <input id="proposal-title" className="field-input" value={form.title} minLength={12} maxLength={140} required placeholder="e.g. Should our town add more public recycling bins?" onChange={e => update('title', e.target.value)} />
           <div className="field-help">{form.title.length}/140 characters · Make it clear and neutral.</div>
@@ -362,9 +374,11 @@ function Create() {
           <label className="field-label" htmlFor="proposal-closes">Closing date <span className="optional">(optional)</span></label>
           <input id="proposal-closes" type="datetime-local" className="field-input" value={form.closesAt} onChange={e => update('closesAt', e.target.value)} />
           <div className="field-help">Leave blank to keep voting open until you close it.</div>
+          <label className="feature-checkbox local-creation"><input type="checkbox" checked={form.localOnly} onChange={e=>update('localOnly',e.target.checked)}/> Require independently verified local eligibility to vote or sign</label>
+          {form.localOnly&&<div className="locality-inputs"><label className="field-label" htmlFor="local-city">City/town <span>*</span></label><input required id="local-city" className="field-input" minLength={2} maxLength={80} placeholder="e.g. East Haven" value={form.locality} onChange={e=>update('locality',e.target.value)}/><label className="field-label" htmlFor="local-region">State/region <span>*</span></label><input required id="local-region" className="field-input" minLength={2} maxLength={80} placeholder="e.g. Connecticut" value={form.region} onChange={e=>update('region',e.target.value)}/><p>Only independently approved participants can vote or sign. Local approvals require manual review.</p></div>}
         </div></div>
         {error && <ErrorBox message={error} />}
-        <div className="submit-section"><div><ShieldCheck size={19} /><span>You'll be listed as the creator. You can close your proposal when you're ready.</span></div><button className="button button-primary" disabled={saving} type="submit">{saving ? 'Publishing...' : user ? 'Publish proposal' : 'Log in to publish'} <ArrowRight size={18} /></button></div>
+        <div className="submit-section"><div><ShieldCheck size={19} /><span>No sign-in required. Keep this browser's session cookie to manage your proposal later.</span></div><button className="button button-primary" disabled={saving} type="submit">{saving ? 'Publishing...' : 'Publish proposal'} <ArrowRight size={18} /></button></div>
       </form>
       <aside className="create-sidebar"><div className="preview-card"><span className="preview-tag"><Eye size={15} /> LIVE PREVIEW</span><div className={'preview-art art-' + colors[form.category as Category]}><CategoryIcon category={form.category as Category} size={45} /></div><div className="preview-body"><span className="preview-category">{form.category} · {form.kind === 'petition' ? 'Petition' : 'Public poll'}</span><h3>{form.title || 'Your inspiring idea goes here'}</h3><p>{form.description || 'Your proposal description will appear here as you write it.'}</p><div className="preview-footer"><Users size={17} /> 0 voices <ArrowUpRight size={17} /></div></div></div>
         <div className="tips-card"><Sparkles size={23} /><h3>Tips for a great proposal</h3><ul><li>Ask one clear question.</li><li>Give context from different perspectives.</li><li>Focus on concrete, achievable changes.</li><li>Invite honest participation — not just agreement.</li></ul></div>
@@ -373,18 +387,23 @@ function Create() {
   </main>;
 }
 function ActivityPage() {
-  const { user, loading, openAuth } = useAuth();
-  const [data, setData] = useState<Activity | null>(null);
-  const [error, setError] = useState('');
-  useEffect(() => { if (user) api<Activity>('/me/activity').then(setData).catch(e => setError(e.message)); else setData(null); }, [user]);
-  if (loading) return <main className="container page-container"><div className="detail-skeleton" /></main>;
-  if (!user) return <main className="container page-container"><div className="auth-required"><UserCircle2 size={42} /><h1>Your activity, all in one place.</h1><p>Log in to see the proposals you created and the conversations you've joined.</p><button className="button button-primary" onClick={openAuth}>Log in or create an account <ArrowRight size={17} /></button></div></main>;
-  return <main className="container page-container activity-page"><div className="page-heading"><div className="eyebrow"><span className="eyebrow-line" /> YOUR SPACE</div><h1>My <span>activity.</span></h1><p>Follow your ideas and the voices you've added to the conversation.</p></div><div className="profile-strip"><div className="avatar profile-avatar">{user.display_name.charAt(0).toUpperCase()}</div><div><strong>{user.display_name}</strong><span>{user.email}</span></div><span className="profile-badge"><ShieldCheck size={15} /> Signed in</span></div>
-    {error ? <ErrorBox message={error} /> : !data ? <div className="detail-skeleton" /> : <><div className="activity-section"><SectionTitle eyebrow="MADE BY YOU" title="Your proposals" action={<Link className="section-action" to="/create">Create a new one <Plus size={17} /></Link>} />{data.created.length ? <div className="card-grid">{data.created.map((p, i) => <ProposalCard key={p.id} proposal={p} index={i} />)}</div> : <EmptyState />}</div><div className="activity-section"><SectionTitle eyebrow="YOUR PARTICIPATION" title="Where you've voted" />{data.voted.length ? <div className="card-grid">{data.voted.map((p, i) => <ProposalCard key={p.id} proposal={p} index={i} />)}</div> : <div className="empty-state compact"><Vote size={29} /><h3>No votes yet</h3><p>Explore proposals and share your perspective.</p><Link to="/explore" className="button button-outline">Explore proposals <ArrowRight size={16} /></Link></div>}</div></>}
+  const { user, loading } = useAuth();
+  const [data,setData]=useState<Activity|null>(null);
+  const [error,setError]=useState('');
+  useEffect(()=>{setData(null);api<Activity>('/me/activity').then(setData).catch(e=>setError(e.message));},[user]);
+  if(loading)return <main className="container page-container"><div className="detail-skeleton"/></main>;
+  return <main className="container page-container activity-page">
+    <div className="page-heading"><div className="eyebrow"><span className="eyebrow-line"/> YOUR SPACE</div><h1>My <span>activity.</span></h1><p>Track the proposals you create and the discussions you've joined — even without an account on this browser.</p></div>
+    {user?<div className="profile-strip"><div className="avatar profile-avatar">{user.display_name.charAt(0).toUpperCase()}</div><div><strong>{user.display_name}</strong><span>{user.email}</span></div><span className="profile-badge"><ShieldCheck size={15}/> Signed in</span></div>:<div className="guest-activity-note"><LockKeyhole size={19}/><div><b>Guest participation</b><p>Activity is tied to this browser's cookie. Clearing it or switching browsers can make activity inaccessible. A free account is only needed if you want to save petitions.</p></div></div>}
+    {error?<ErrorBox message={error}/>:!data?<div className="detail-skeleton"/>:<>
+      <div className="activity-section"><SectionTitle eyebrow="MADE BY YOU" title="Your proposals" action={<Link className="section-action" to="/create">Create a new one <Plus size={17}/></Link>}/>{data.created.length?<div className="card-grid">{data.created.map((p,i)=><ProposalCard key={p.id} proposal={p} index={i}/>)}</div>:<EmptyState/>}</div>
+      <div className="activity-section"><SectionTitle eyebrow="YOUR PARTICIPATION" title="Where you've voted"/>{data.voted.length?<div className="card-grid">{data.voted.map((p,i)=><ProposalCard key={p.id} proposal={p} index={i}/>)}</div>:<div className="empty-state compact"><Vote size={29}/><h3>No votes yet</h3><p>Explore proposals and share your perspective, without signing in.</p><Link to="/explore" className="button button-outline">Explore proposals <ArrowRight size={16}/></Link></div>}</div>
+      {user&&<div className="activity-section"><SectionTitle eyebrow="YOUR COLLECTION" title="Saved petitions"/>{data.saved.length?<div className="card-grid">{data.saved.map((p,i)=><ProposalCard key={p.id} proposal={p} index={i}/>)}</div>:<div className="empty-state compact"><h3>Nothing saved yet</h3><p>Save petitions from their detail pages to return to them later.</p><Link to="/explore" className="button button-outline">Browse proposals</Link></div>}</div>}
+    </>}
   </main>;
 }
 function About() {
-  return <main className="container page-container about-page"><div className="page-heading"><div className="eyebrow"><span className="eyebrow-line" /> ABOUT MY PETITION</div><h1>Better ideas start with <span>every voice.</span></h1><p>My Petition is a public participation platform where people can start proposals, share perspectives, and understand the conversation around them.</p></div><div className="about-grid"><div><HeartHandshake size={30} /><h2>Create a petition or poll</h2><p>Introduce a proposal with a clear question and enough context for an informed decision.</p></div><div><Vote size={30} /><h2>Choose your position</h2><p>Support or oppose a proposal. One logged-in account can have one active response per proposal, and can update that response.</p></div><div><LockKeyhole size={30} /><h2>Decide what to share</h2><p>Show your account display name on a vote or keep it hidden. My Petition still associates your vote with your account to limit duplicate participation. Public comments always show your display name.</p></div><div><BarChart3 size={30} /><h2>Understand the results</h2><p>See up-to-date counts and the balance of opinions. Results reflect only people who participated online: they do not represent a scientific sample, legal petition signature verification, or an official election.</p></div></div><div className="about-cta"><h2>Ready to make your voice count?</h2><Link className="button button-primary" to="/explore">Explore proposals <ArrowRight size={18} /></Link></div></main>;
+  return <main className="container page-container about-page"><div className="page-heading"><div className="eyebrow"><span className="eyebrow-line" /> ABOUT MY PETITION</div><h1>Better ideas start with <span>every voice.</span></h1><p>My Petition is a public participation platform where people can start proposals, share perspectives, and understand the conversation around them.</p></div><div className="about-grid"><div><HeartHandshake size={30} /><h2>Create a petition or poll</h2><p>Introduce a proposal with a clear question and enough context for an informed decision.</p></div><div><Vote size={30} /><h2>Choose your position</h2><p>Support or oppose without registering. Your browser session holds one current response per proposal. You can change it, but clearing cookies can let another response be submitted.</p></div><div><LockKeyhole size={30} /><h2>Decide what to share</h2><p>Choose a public display name or keep your voting name hidden. Guest activity stays associated with this browser; traceable e-signatures require email verification, explicit consent, and a private audit record.</p></div><div><BarChart3 size={30} /><h2>Understand the results</h2><p>See updated counts and signed-petition totals. Save petitions with an account, or participate as a guest. Results reflect only voluntary online participants: they're neither scientific polling nor legal certification.</p></div></div><div className="about-cta"><h2>Ready to make your voice count?</h2><Link className="button button-primary" to="/explore">Explore proposals <ArrowRight size={18} /></Link></div></main>;
 }
 
 function TurnstileChallenge({ siteKey, onToken }: { siteKey: string; onToken: (token: string) => void }) {
@@ -432,7 +451,7 @@ function AuthDialog({ onClose, onLogin }: { onClose: () => void; onLogin: (user:
     } catch (e) { setError((e as Error).message); }
     finally { setSubmitting(false); }
   };
-  return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}><div className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title"><button className="icon-button modal-close" onClick={onClose} aria-label="Close dialog"><X size={21} /></button><div className="dialog-logo"><span className="brand-symbol"><span></span><span></span><span></span></span></div><div className="eyebrow dialog-eyebrow">MY PETITION</div><h2 id="auth-title">{mode === 'login' ? 'Welcome back.' : 'Join the conversation.'}</h2><p>{mode === 'login' ? 'Sign in and keep making your voice count.' : 'Create an account to publish proposals and participate.'}</p><div className="auth-tabs"><button type="button" onClick={() => { setMode('login'); setError(''); }} className={mode === 'login' ? 'selected' : ''}>Log in</button><button type="button" onClick={() => { setMode('register'); setError(''); }} className={mode === 'register' ? 'selected' : ''}>Sign up</button></div><form onSubmit={e => { void submit(e); }}>{mode === 'register' && <><label className="field-label" htmlFor="auth-name">Display name</label><input id="auth-name" className="field-input" autoComplete="nickname" required minLength={2} maxLength={60} placeholder="How should people see you?" value={displayName} onChange={e => setDisplayName(e.target.value)} /></>}<label className="field-label" htmlFor="auth-email">Email address</label><input id="auth-email" className="field-input" type="email" autoComplete="email" required placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} /><label className="field-label" htmlFor="auth-password">Password</label><input id="auth-password" className="field-input" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={mode === 'register' ? 12 : undefined} required placeholder={mode === 'register' ? 'At least 12 characters' : 'Enter your password'} value={password} onChange={e => setPassword(e.target.value)} />{mode === 'register' && turnstileSiteKey && <TurnstileChallenge siteKey={turnstileSiteKey} onToken={setToken} />}{error && <ErrorBox message={error} />}<button type="submit" disabled={submitting || (mode === 'register' && Boolean(turnstileSiteKey) && !token)} className="button button-primary button-block auth-submit">{submitting ? 'Please wait...' : mode === 'login' ? 'Log in' : 'Create account'} <ArrowRight size={17} /></button></form><div className="dialog-privacy"><LockKeyhole size={15} /> Your email is never displayed publicly. Display names may be pseudonyms; accounts are not verified identities.</div></div></div>;
+  return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}><div className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title"><button className="icon-button modal-close" onClick={onClose} aria-label="Close dialog"><X size={21} /></button><div className="dialog-logo"><span className="brand-symbol"><span></span><span></span><span></span></span></div><div className="eyebrow dialog-eyebrow">MY PETITION</div><h2 id="auth-title">{mode === 'login' ? 'Welcome back.' : 'Join the conversation.'}</h2><p>{mode === 'login' ? 'Sign in to access your saved petitions.' : 'Create an account to save petitions across devices. Posting, voting, and signing don't require an account.'}</p><div className="auth-tabs"><button type="button" onClick={() => { setMode('login'); setError(''); }} className={mode === 'login' ? 'selected' : ''}>Log in</button><button type="button" onClick={() => { setMode('register'); setError(''); }} className={mode === 'register' ? 'selected' : ''}>Sign up</button></div><form onSubmit={e => { void submit(e); }}>{mode === 'register' && <><label className="field-label" htmlFor="auth-name">Display name</label><input id="auth-name" className="field-input" autoComplete="nickname" required minLength={2} maxLength={60} placeholder="How should people see you?" value={displayName} onChange={e => setDisplayName(e.target.value)} /></>}<label className="field-label" htmlFor="auth-email">Email address</label><input id="auth-email" className="field-input" type="email" autoComplete="email" required placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} /><label className="field-label" htmlFor="auth-password">Password</label><input id="auth-password" className="field-input" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={mode === 'register' ? 12 : undefined} required placeholder={mode === 'register' ? 'At least 12 characters' : 'Enter your password'} value={password} onChange={e => setPassword(e.target.value)} />{mode === 'register' && turnstileSiteKey && <TurnstileChallenge siteKey={turnstileSiteKey} onToken={setToken} />}{error && <ErrorBox message={error} />}<button type="submit" disabled={submitting || (mode === 'register' && Boolean(turnstileSiteKey) && !token)} className="button button-primary button-block auth-submit">{submitting ? 'Please wait...' : mode === 'login' ? 'Log in' : 'Create account'} <ArrowRight size={17} /></button></form><div className="dialog-privacy"><LockKeyhole size={15} /> Your email is never displayed publicly. Display names may be pseudonyms; accounts are not verified identities.</div></div></div>;
 }
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -441,7 +460,7 @@ export default function App() {
   useEffect(() => { let active = true; api<{ user: User | null }>('/session').then(result => { if (active) setUser(result.user); }).catch(() => {}).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
   const logout = async () => { try { await api('/auth/logout', {}); setUser(null); } catch { setUser(null); } };
   return <AuthContext.Provider value={{ user, loading, openAuth: () => setAuthOpen(true), logout }}>
-    <BrowserRouter><ScrollToTop /><div className="app-shell"><Header /><Routes><Route path="/" element={<Home />} /><Route path="/explore" element={<Explore />} /><Route path="/proposal/:slug" element={<ProposalPage />} /><Route path="/create" element={<Create />} /><Route path="/activity" element={<ActivityPage />} /><Route path="/about" element={<About />} /><Route path="*" element={<main className="container page-container"><EmptyState filtered /></main>} /></Routes><Footer /></div></BrowserRouter>
+    <BrowserRouter><ScrollToTop /><div className="app-shell">{!window.location.pathname.startsWith('/embed/')&&<Header/>}<Routes><Route path="/" element={<Home />} /><Route path="/explore" element={<Explore />} /><Route path="/proposal/:slug" element={<ProposalPage />} /><Route path="/create" element={<Create />} /><Route path="/activity" element={<ActivityPage />} /><Route path="/about" element={<About/>}/><Route path="/moderation" element={<ModerationPage/>}/><Route path="/embed/:slug" element={<EmbedPage/>}/><Route path="*" element={<main className="container page-container"><EmptyState filtered /></main>} /></Routes>{!window.location.pathname.startsWith('/embed/')&&<Footer/>}</div></BrowserRouter>
     {authOpen && <AuthDialog onClose={() => setAuthOpen(false)} onLogin={next => { setUser(next); setAuthOpen(false); }} />}
   </AuthContext.Provider>;
 }
