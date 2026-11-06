@@ -7,7 +7,7 @@
   A beautifully designed platform for petitions, community proposals, and public opinion polls.
 
   [![CI](https://github.com/theworker02/my-petition/actions/workflows/ci.yml/badge.svg)](https://github.com/theworker02/my-petition/actions/workflows/ci.yml)
-  ![Stage](https://img.shields.io/badge/release-alpha-6c52f6)
+  ![Stage](https://img.shields.io/badge/release-1.0.0--rc.1-6c52f6)
   ![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-3c338c)
   ![Runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-f48120)
 
@@ -15,7 +15,7 @@
 </div>
 
 > [!IMPORTANT]
-> **My Petition is an early alpha, not a public election or legally certified signature service.** People can participate without an account. Email verification is required for traceable electronic signatures, but is not proof of legal identity or local residency. Guest vote counts represent voluntary online responses, not verified unique individuals or a representative survey. A production launch needs further security, identity, privacy, and moderation work.
+> **My Petition is a 1.0.0 release candidate, not yet a confirmed live production deployment or legally certified signature service.** The application is built to run on Cloudflare Workers + D1 and has a gated production workflow. A site operator must supply live Cloudflare, Turnstile and email configuration, run end-to-end launch checks, and approve final policies before public release. Guest responses are voluntary online participation, not a representative survey or a binding election.
 
 ## Screenshots
 
@@ -41,7 +41,7 @@ Screenshots below are captured automatically from the **running React applicatio
 
 My Petition lets communities discuss a clear question, record support and opposition, and optionally collect electronic signatures. It combines a responsive participation experience with transparent, auditable workflows.
 
-- **No registration for participation.** Create a petition, vote, comment, or start email verification for an e-signature as a guest. A guest cookie associates activity with the current browser; clearing cookies or changing devices may make that activity inaccessible.
+- **No registration for participation.** Create a petition, vote, comment, or start email verification for an e-signature as a guest. Cloudflare Turnstile challenges protect guest posting and participation when production is configured. A guest cookie associates activity with the current browser; clearing cookies or changing devices may make that activity inaccessible.
 - **Optional account to save petitions.** Create an account or log in to build a personal saved collection. Accounts do not automatically merge prior guest activity.
 - **Petitions and polls.** Petition pages have a separate opt-in electronic signing experience. Poll pages collect support or opposition.
 - **Optional name display.** Guest voters choose whether to show a display name; comments always show a chosen public name. Names in ordinary votes can be hidden, but vote storage is **not cryptographically anonymous**.
@@ -156,45 +156,91 @@ npx wrangler d1 execute my-petition-db --local --file=fixtures/screenshot-seed.s
 
 **Never run the screenshot seed against production.** To regenerate the screenshots, run the [Capture UI screenshots](.github/workflows/screenshots.yml) GitHub Actions workflow, which starts the app locally and captures actual Chromium pages. The generated images are committed to `docs/screenshots/`.
 
-## Deploy to Cloudflare
+## Deploy to Cloudflare Workers
 
-This app uses one Cloudflare Worker for API routes **and** static assets, plus a D1 database. No separate Netlify project is needed.
+My Petition uses **one Cloudflare Worker with Static Assets** for both the Vite/React website and the Hono API, plus a **Cloudflare D1** database. **Cloudflare Pages is unnecessary**: there is no second frontend deployment, no Netlify project, and no paid custom domain required. A `*.workers.dev` address can be used once the Worker is deployed and the Cloudflare account has a Workers subdomain.
 
-1. Authenticate with Cloudflare: `npx wrangler login`.
-2. Create the database: `npx wrangler d1 create my-petition-db`.
-3. Copy the real **database ID** from the CLI into `wrangler.jsonc`.
-4. Apply schema migrations: `npm run db:remote`.
-5. Configure the required secrets and production safeguards (see below).
-6. Build and deploy: `npm run deploy`.
+Deployment is **deliberately manual and gated** from [GitHub Actions: Deploy production](.github/workflows/production.yml). Pushing code or passing CI **does not publish the website**. The `wrangler.jsonc` database ID is a local-only placeholder, not a live database.
 
-The public site is not automatically deployed from this repository. Domain configuration, monitoring, and production security review remain separate tasks.
+### Step 1. Set up Cloudflare D1 and Turnstile
 
-### Email verification and signing configuration
+1. Sign in at [Cloudflare Dashboard](https://dash.cloudflare.com/). Locate your **Account ID** and create a scoped **API token** that can manage Workers scripts and the My Petition D1 database. Do not paste the token into code, issues or chat.
+2. From your own terminal, authenticate with Cloudflare and create the database:
 
-The backend sends one-time email codes via [Resend](https://resend.com/). To activate email verification and signatures, supply the following values to the Worker environment:
+   ```bash
+npx wrangler login
+npx wrangler d1 create my-petition-db
+```
 
-| Variable | Where | Purpose |
-|---|---|---|
-| `RESEND_API_KEY` | Secret | Sends verification emails |
-| `MAIL_FROM` | Environment value | Verified sender address in Resend |
-| `EMAIL_OTP_SECRET` | Secret | Protects one-time code hashes |
-| `AUDIT_HASH_SECRET` | Secret | Protects signed IP / abuse-control evidence |
-| `TURNSTILE_SITE_KEY` | Public configuration | Cloudflare Turnstile site key for account registration |
-| `TURNSTILE_SECRET` | Secret | Cloudflare Turnstile challenge validation |
-| `MODERATOR_EMAILS` | Restricted configuration | Comma-separated verified email addresses allowed to moderate |
+3. Copy the real D1 **database UUID** to GitHub's environment variables (next step), not to the placeholder in the tracked development configuration.
+4. In [Cloudflare Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile), create a widget for your future site. Store both the **site key** and **secret key**. If you use a `workers.dev` URL, add its hostname to the allowed Turnstile domains. Guest posts, comments, votes and reports are challenged when Turnstile is configured.
+5. In [Resend](https://resend.com/), verify the email sender domain you are authorized to use, create an API key, and select a support contact address. The email provider's sender domain must match the configured `MAIL_FROM` address.
 
-Example for secret fields:
+### Step 2. Configure GitHub Actions
 
-~~~bash
-npx wrangler secret put RESEND_API_KEY
-npx wrangler secret put EMAIL_OTP_SECRET
-npx wrangler secret put AUDIT_HASH_SECRET
-npx wrangler secret put TURNSTILE_SECRET
-~~~
+Go to [Repository settings → Environments](https://github.com/theworker02/my-petition/settings/environments), create an environment named **production**, and apply reviewer restrictions where available. Then configure the following **environment secrets and variables** (under the selected environment).
 
-Use cryptographically random values for hash secrets (for example `openssl rand -hex 32`). Provide `MAIL_FROM`, `TURNSTILE_SITE_KEY`, and `MODERATOR_EMAILS` through appropriate, non-secret Worker configuration. A moderator must have successfully verified an email address matching the allowlist before accessing `/moderation`.
+| Name | GitHub type | Required | Purpose |
+|---|---|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` | Secret | Yes | 32-character Cloudflare account ID |
+| `CLOUDFLARE_API_TOKEN` | Secret | Yes | Scoped Workers and D1 deployment permission |
+| `D1_DATABASE_ID` | Variable | Yes | Existing My Petition D1 database UUID |
+| `RESEND_API_KEY` | Secret | Yes | Sends email verification and password-recovery messages |
+| `MAIL_FROM` | Variable | Yes | Verified sender address, for example `My Petition <noreply@example.org>` |
+| `EMAIL_OTP_SECRET` | Secret | Yes | Random secret for verification codes and reset links |
+| `AUDIT_HASH_SECRET` | Secret | Yes | Different random secret for signature sealing and rate-limit keys |
+| `TURNSTILE_SITE_KEY` | Variable | Yes | Public Cloudflare anti-bot site key |
+| `TURNSTILE_SECRET` | Secret | Yes | Private Cloudflare anti-bot verification key |
+| `MODERATOR_EMAILS` | Variable | Yes | Comma-separated approved moderator email addresses |
+| `SITE_SUPPORT_EMAIL` | Variable | Yes | Public contact for the website |
+| `PRODUCTION_BASE_URL` | Variable | Optional | Public HTTPS origin (recommended after the first deployment) |
 
-**If the mail provider or audit secret is not configured, the app refuses to send verification codes or record e-signatures.** Those features should not be advertised as fully operational until configured and tested end-to-end.
+Generate the two distinct 32+ character hash secrets locally:
+
+```bash
+openssl rand -hex 32
+openssl rand -hex 32
+```
+
+
+Protect these values as long-lived cryptographic keys. **Rotating the signature-audit key without a key-versioning migration invalidates prior receipt seals.** Cloudflare credentials must be least-privilege and must not be committed.
+
+### Step 3. Deploy with the guarded workflow
+
+1. Confirm that the standard [CI](.github/workflows/ci.yml) workflow is green and that the [screenshot gallery](#screenshots) builds successfully.
+2. Go to [GitHub Actions → Deploy production](https://github.com/theworker02/my-petition/actions/workflows/production.yml).
+3. Select **Run workflow** for `main`.
+4. The workflow validates all required values, builds the app, applies all remote D1 schema migrations, deploys the Worker and static assets with the secrets, then checks the public `/api/ready` endpoint.
+5. A green deployment workflow is necessary but **not sufficient**: complete the verification checklist below before announcing the site.
+
+The `scripts/prepare-production.mjs` release script creates ignored, temporary config and secret files. If required values are missing or the D1 UUID is a placeholder, it fails before applying remote migrations. On an existing deployment, **back up D1 and review the migration plan before running the release workflow**.
+
+### Step 4. Launch verification checklist
+
+- [ ] A real `workers.dev` or custom-domain URL loads with HTTPS and correct routing to the API.
+- [ ] `GET /api/ready` returns `{"ready":true,"production":true}` from the **deployed** site.
+- [ ] Guest visitor can create a proposal, select support or opposition, comment and submit a report with working Turnstile.
+- [ ] Resend delivers a one-time code to a **real**, operator-controlled email inbox; invalid and expired codes are rejected.
+- [ ] Operator verifies one signed petition receipt, duplicate signature rejection, privacy-safe receipt verification and local-eligibility enforcement.
+- [ ] Password recovery works from a genuine received email, invalidates old sessions, and cannot be reused.
+- [ ] Moderator's verified email can access the review queue; a regular visitor cannot. Test hiding content and reviewing local evidence.
+- [ ] Registered and guest visitors can export and delete their own data; deletion does not expose others' private information.
+- [ ] Operator establishes backup and restoration procedures, sets incident escalation, verifies security headers, and reviews accessibility on both desktop and mobile.
+- [ ] Final, jurisdiction-appropriate **Privacy Policy**, **Terms**, moderation/appeals rules, consent retention, and support contact are approved and published. Current in-app legal disclosures are preliminary, not legal counsel's reviewed policies.
+- [ ] No screenshot fixtures or fake votes have been imported into **remote** D1; screenshots use a separate local demo database.
+
+The operator should perform a controlled beta or canary test and confirm those checks before promoting `1.0.0-rc.1` to a stable public `1.0.0` release.
+
+### Cloudflare pricing and architecture
+
+Cloudflare Workers can host the UI and API together, and D1 supplies persistent storage. An account's free-plan limits, email-provider quotas and future custom domain costs should be checked directly before advertising a zero-cost service. There is no requirement to buy a domain for the initial `workers.dev` deployment.
+
+### Core security notes
+
+- Guest cookies and browser challenges **do not verify unique human identity**; online tallies must not be presented as binding votes or accurate census polling.
+- Verified email is **not** independently verified legal identity, and manual local checks are not automatically reliable proof of residency.
+- The HMAC-based receipt records remain controlled by the service operator; they are not qualified independent e-signatures.
+- API rate limiting uses HMAC-derived keys in D1, subject to normal scaling limitations. Cloudflare WAF rules, bot monitoring, and incident alerting should also be enabled before a wider public launch.
 
 ## Project layout
 
@@ -202,6 +248,8 @@ Use cryptographically random values for hash secrets (for example `openssl rand 
 my-petition/
 ├── src/
 │   ├── App.tsx            # Pages, authentication UI, voting and proposal views
+│   ├── account.tsx        # Password recovery, privacy export/deletion and legal disclosures
+│   ├── turnstile.tsx      # Shared anti-bot verification UI
 │   ├── features.tsx       # Signatures, verification, sharing, moderation, notifications
 │   ├── api.ts             # Typed API client
 │   ├── styles.css         # Core design system and responsive UI
@@ -212,7 +260,8 @@ my-petition/
 ├── fixtures/              # Local-only example data for screenshots
 ├── scripts/               # Automated Chromium screenshot capture
 ├── docs/screenshots/      # Actual captured UI images (generated)
-├── .github/workflows/     # CI and screenshot automation
+├── .github/workflows/     # CI, screenshot capture, and gated production deployment
+├── scripts/prepare-production.mjs # Validated ephemeral Worker release config
 ├── wrangler.jsonc         # Worker and D1 configuration
 └── package.json           # Local commands and dependencies
 ~~~
@@ -236,6 +285,11 @@ my-petition/
 | `GET /api/me/notifications` | In-app notification list |
 | `POST /api/reports` | Report a proposal or comment |
 | `GET /api/moderation/queue` | Moderator-only review queue |
+| `GET /api/ready` | Check live production configuration and database connectivity |
+| `POST /api/auth/password-reset/request` | Request a single-use password recovery link |
+| `POST /api/auth/password-reset/confirm` | Confirm a valid recovery token and revoke old sessions |
+| `GET /api/me/export` | Download user or guest-session data |
+| `DELETE /api/me/account` | Permanently erase account or guest-session data |
 
 ## Privacy, trust and limitations
 
@@ -244,10 +298,10 @@ my-petition/
 - **Email verification is not identity verification.** Owning an email inbox does not establish legal name, residency, or uniqueness.
 - **Legal treatment of signatures varies.** The app records intent and sealed evidence, but server-held integrity seals are not an independent attestation. They do not provide qualified signatures, independently verified identity or automatic statutory petition eligibility.
 - **Local verification is not automated.** Moderators need a reliable independent identity/residency-check process and privacy-safe evidence handling.
-- **Public launch is not yet approved.** Before production, add stronger request throttles, fraud protection, security tests, account recovery, guest-to-account migration, consent and retention policies, account deletion, complaint appeals, backups, abuse monitoring, and a comprehensive accessibility review.
+- **Public launch is not yet approved.** Basic throttling, account recovery, self-service export/deletion and a guarded release workflow now exist, but public release still requires provider setup, a manual live test, backup/recovery drills, guest-to-account migration, moderation appeals, a final privacy/retention review and an accessibility audit.
 
 ## Contribution and development principles
 
 Avoid fabricated public participation totals or misleading endorsements. Make support and opposition equally accessible, and never use persuasive UI patterns to steer users toward a particular position. Build accessibility, mobile responsiveness, privacy, and moderation into new features by default.
 
-**Maintainer:** [theworker02](https://github.com/theworker02) · **Status:** Alpha / active development
+**Maintainer:** [theworker02](https://github.com/theworker02) · **Status:** 1.0.0 release candidate — pending production verification
