@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
     "dev:web": "vite --host 127.0.0.1",
-    "dev:api": "wrangler dev --port 8787 --local",
+    "dev:api": "node -e \"require('node:fs').mkdirSync('dist',{recursive:true})\" && wrangler dev --port 8787 --local",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "db:local": "wrangler d1 migrations apply my-petition-db --local",

@@ -10,6 +10,7 @@ on:
       - 'migrations/**'
       - 'fixtures/**'
       - 'scripts/capture-screenshots.mjs'
+      - 'package.json'
       - '.github/workflows/screenshots.yml'
 
 permissions:
@@ -33,6 +34,8 @@ jobs:
           node-version: '22'
       - name: Install project dependencies
         run: npm install
+      - name: Build UI assets for Wrangler
+        run: npm run build
       - name: Install screenshot runner
         run: |
           npm install --no-save playwright@1.56.1
