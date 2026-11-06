@@ -215,7 +215,7 @@ app.get('/api/proposals/:slug', async (c) => {
     c.env.DB.prepare('SELECT x.id,x.body,x.created_at,u.display_name FROM comments x JOIN users u ON u.id=x.user_id WHERE x.proposal_id=? ORDER BY x.created_at DESC LIMIT 40')
       .bind(p.id).all<{ id: string; body: string; created_at: string; display_name: string }>()
   ]);
-  return c.json({ proposal: formatProposal(p), myVote: myVote ?? null, participants: participantRows.results ?? [], comments: commentRows.results ?? [] });
+  return c.json({ proposal: formatProposal(p), isAuthor: user?.id === p.author_id, myVote: myVote ?? null, participants: participantRows.results ?? [], comments: commentRows.results ?? [] });
 });
 
 app.post('/api/proposals', async (c) => {

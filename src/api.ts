@@ -10,6 +10,7 @@ export type Proposal = {
 export type Position = 'support' | 'oppose';
 export type ProposalDetail = {
   proposal: Proposal;
+  isAuthor: boolean;
   myVote: { stance: Position; show_name: number } | null;
   participants: Array<{ stance: Position; display_name: string | null }>;
   comments: Array<{ id: string; body: string; created_at: string; display_name: string }>;

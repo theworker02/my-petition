@@ -278,7 +278,6 @@ function ProposalPage() {
   if (error || !data) return <main className="container page-container"><ErrorBox message={error || 'Proposal not found.'} /><Link to="/explore" className="text-link">Back to explore</Link></main>;
   const p = data.proposal;
   const total = p.support_count + p.oppose_count;
-  const percent = percentage(p.support_count, p.oppose_count);
   const mineUnchanged = !!data.myVote && data.myVote.stance === stance && Boolean(data.myVote.show_name) === showName;
   return <main className="container page-container proposal-page">
     <Link className="back-link" to="/explore"><ArrowLeft size={18} /> All proposals</Link>
@@ -313,7 +312,7 @@ function ProposalPage() {
             {voted && <div className="success-note" role="status"><CheckCircle2 size={18} /> Your vote has been recorded.</div>}
           </> : <div className="closed-note"><LockKeyhole size={18} /> This proposal is no longer accepting votes.</div>}
           <div className="privacy-caption"><ShieldCheck size={17} /><span>Your identity is never published with an anonymous-display vote. Your account is still used to prevent duplicate votes.</span></div>
-          {user && data.proposal.author_name === user.display_name && p.is_open && <button className="close-action" onClick={() => { void close(); }}>Close this proposal</button>}
+          {user && data.isAuthor && p.is_open && <button className="close-action" onClick={() => { void close(); }}>Close this proposal</button>}
         </div>
         <div className="participants-panel"><div className="participants-head"><h3>Recent participants</h3><span className="participant-count">{total}</span></div>
           {data.participants.length ? <div className="participant-list">{data.participants.map((part, i) => <div className="participant-row" key={i}><span className={'avatar participant-avatar' + (!part.display_name ? ' anonymous-avatar' : '')}>{part.display_name ? part.display_name.charAt(0).toUpperCase() : <LockKeyhole size={15} />}</span><span className="participant-name">{part.display_name || 'Anonymous participant'}</span><span className={'participant-stance ' + part.stance}>{part.stance === 'support' ? 'Supports' : 'Opposes'}</span></div>)}</div> : <div className="participants-empty">Be the first to participate.</div>}
