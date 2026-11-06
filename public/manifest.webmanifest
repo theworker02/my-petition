@@ -1,0 +1,18 @@
+{
+  "name": "My Petition",
+  "short_name": "My Petition",
+  "description": "Make space for every voice. Create proposals and share your perspective.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8f9fc",
+  "theme_color": "#684efa",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
