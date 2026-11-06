@@ -298,7 +298,7 @@ app.get('/api/ready', async (c) => {
   catch {return c.json({ready:false,production:state.production},503);}
   return c.json({ready:state.ready,production:state.production},state.ready?200:503);
 });
-app.get('/api/config', (c) => c.json({ turnstileSiteKey: c.env.TURNSTILE_SITE_KEY || '' }));
+app.get('/api/config', (c) => c.json({ turnstileSiteKey: c.env.TURNSTILE_SITE_KEY || '', siteSupportEmail: c.env.SITE_SUPPORT_EMAIL || '' }));
 app.get('/api/session', async (c) => {
   const user=await currentUser(c);
   return c.json({ user, hasGuest:!!sessionCookie(c,guestCookieName) });

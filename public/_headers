@@ -16,3 +16,7 @@
 
 /activity*
   X-Robots-Tag: noindex, nofollow
+
+/reset-password*
+  X-Robots-Tag: noindex, nofollow
+  Referrer-Policy: no-referrer
