@@ -35,9 +35,17 @@ try{
   const secrets=JSON.parse(readFileSync('.secrets.production.json','utf8'));
   assert.equal(config.d1_databases[0].database_id,environment.D1_DATABASE_ID);
   assert.equal(config.vars.PRODUCTION_MODE,'true');
+  assert.deepEqual(config.secrets.required,['RESEND_API_KEY','EMAIL_OTP_SECRET','AUDIT_HASH_SECRET','TURNSTILE_SECRET']);
   assert.equal(config.workers_dev,true);
   assert.equal(secrets.AUDIT_HASH_SECRET,environment.AUDIT_HASH_SECRET);
   assert.ok(!JSON.stringify(config).includes(environment.RESEND_API_KEY),'API credentials cannot be embedded in publishable Wrangler config');
+  // Build with the generated production config and fake credentials; no remote upload.
+  const dry=spawnSync('node_modules/.bin/wrangler',
+    ['deploy','--dry-run','--config','wrangler.production.jsonc','--secrets-file','.secrets.production.json'],
+    {encoding:'utf8',timeout:120000,env:environment}
+  );
+  assert.equal(dry.status,0,'Wrangler production bundle validation failed: '+String(dry.stderr||'').slice(-3000));
+
   clean();
 
   const invalidMissing={...environment,RESEND_API_KEY:''};

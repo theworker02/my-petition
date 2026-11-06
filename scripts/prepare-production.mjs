@@ -25,7 +25,7 @@ config.vars={
   MODERATOR_EMAILS:env.MODERATOR_EMAILS,
   SITE_SUPPORT_EMAIL:env.SITE_SUPPORT_EMAIL
 };
-config.secrets=['RESEND_API_KEY','EMAIL_OTP_SECRET','AUDIT_HASH_SECRET','TURNSTILE_SECRET'];
+config.secrets={required:['RESEND_API_KEY','EMAIL_OTP_SECRET','AUDIT_HASH_SECRET','TURNSTILE_SECRET']};
 writeFileSync('wrangler.production.jsonc',JSON.stringify(config,null,2)+'\n',{mode:0o600});
 writeFileSync('.secrets.production.json',JSON.stringify({
   RESEND_API_KEY:env.RESEND_API_KEY,
