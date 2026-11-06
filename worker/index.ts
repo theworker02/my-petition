@@ -222,6 +222,9 @@ function ratePolicyFor(path:string, method:string):RatePolicy|null{
   if(method!=='POST' && method!=='DELETE') return null;
   if(path==='/api/auth/register') return {name:'register',limit:8,windowSeconds:3600};
   if(path==='/api/auth/login') return {name:'login',limit:40,windowSeconds:900};
+  if(path==='/api/auth/password-reset/request') return {name:'password-reset-send',limit:8,windowSeconds:3600};
+  if(path==='/api/auth/password-reset/confirm') return {name:'password-reset-confirm',limit:25,windowSeconds:3600};
+  if(path==='/api/me/account') return {name:'delete-account',limit:6,windowSeconds:3600};
   if(path==='/api/verification/email/request') return {name:'email-send',limit:12,windowSeconds:3600};
   if(path==='/api/verification/email/confirm') return {name:'email-confirm',limit:50,windowSeconds:3600};
   if(path==='/api/verification/location/request') return {name:'location-request',limit:8,windowSeconds:86400};
@@ -344,6 +347,61 @@ app.post('/api/auth/login', async (c) => {
   await c.env.DB.prepare('DELETE FROM auth_failures WHERE email=?').bind(email).run();
   await issueSession(c, row.id);
   return c.json({ user: { id: row.id, display_name: row.display_name, email: row.email } });
+});
+
+
+// Password recovery is email based; avoid revealing which addresses are registered.
+app.post('/api/auth/password-reset/request', async c=>{
+  const input=await body(c);
+  const email=safeString(input,'email').toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254)return c.json({error:'Enter a valid email address.'},400);
+  if(!c.env.RESEND_API_KEY||!c.env.MAIL_FROM||!c.env.EMAIL_OTP_SECRET)return c.json({error:'Email delivery is not configured.'},503);
+  if(!await verifyTurnstile(c,safeString(input,'turnstileToken')))return c.json({error:'Complete the verification challenge.'},400);
+  const generic={message:'If an account exists for this email, a password reset link will be sent.'};
+  const user=await c.env.DB.prepare("SELECT id FROM users WHERE email=? AND is_guest=0").bind(email).first<{id:string}>();
+  if(!user)return c.json(generic);
+  const recent=await c.env.DB.prepare('SELECT COUNT(*) AS n FROM password_reset_tokens WHERE user_id=? AND created_at>?')
+    .bind(user.id,new Date(Date.now()-3600000).toISOString()).first<{n:number}>();
+  if((recent?.n??0)>=3)return c.json(generic);
+  const token=randomHex(32);
+  const hash=await hmacHex(c.env.EMAIL_OTP_SECRET,'reset|'+token);
+  const expires=new Date(Date.now()+900000).toISOString();
+  const link=new URL('/reset-password?token='+encodeURIComponent(token),new URL(c.req.url).origin).toString();
+  // Save before sending so a delivered reset link is immediately usable.
+  await c.env.DB.prepare('INSERT INTO password_reset_tokens(id,user_id,token_hash,expires_at) VALUES(?,?,?,?)')
+    .bind(crypto.randomUUID(),user.id,hash,expires).run();
+  try{
+    const result=await fetch('https://api.resend.com/emails',{
+      method:'POST',
+      headers:{Authorization:'Bearer '+c.env.RESEND_API_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        from:c.env.MAIL_FROM,to:[email],subject:'Reset your My Petition password',
+        text:'A password reset was requested for My Petition. Visit the link within 15 minutes:\n\n'+link+'\n\nIf this was not you, ignore this message.'
+      })
+    });
+    if(!result.ok)console.error('Password reset email delivery failed with status '+result.status);
+  }catch{console.error('Password reset delivery request failed.');}
+  return c.json(generic);
+});
+app.post('/api/auth/password-reset/confirm',async c=>{
+  if(!c.env.EMAIL_OTP_SECRET)return c.json({error:'Password recovery is not configured.'},503);
+  const input=await body(c);
+  const token=safeString(input,'token');
+  const password=safeString(input,'newPassword');
+  if(!/^[a-f0-9]{64}$/.test(token))return c.json({error:'Reset link is invalid or expired.'},400);
+  if(password.length<12||password.length>200)return c.json({error:'New password must be 12–200 characters.'},400);
+  const tokenHash=await hmacHex(c.env.EMAIL_OTP_SECRET,'reset|'+token);
+  const now=new Date().toISOString();
+  const used=await c.env.DB.prepare('UPDATE password_reset_tokens SET used_at=? WHERE token_hash=? AND used_at IS NULL AND expires_at>? RETURNING user_id')
+    .bind(now,tokenHash,now).first<{user_id:string}>();
+  if(!used)return c.json({error:'Reset link is invalid, already used, or expired.'},400);
+  const salt=randomHex(16);
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE users SET password_hash=?,password_salt=? WHERE id=? AND is_guest=0').bind(await passwordHash(password,salt),salt,used.user_id),
+    c.env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(used.user_id),
+    c.env.DB.prepare('UPDATE password_reset_tokens SET used_at=? WHERE user_id=? AND used_at IS NULL').bind(now,used.user_id)
+  ]);
+  return c.json({success:true,message:'Password changed. Sign in using your new password.'});
 });
 
 app.post('/api/auth/logout', async (c) => {
@@ -744,6 +802,57 @@ app.post('/api/moderation/locations/:id',async c=>{
   await c.env.DB.prepare('UPDATE location_verifications SET status=?,verification_method=?,evidence_reference=?,moderator_id=?,reviewed_at=? WHERE user_id=?')
     .bind(action==='verify'?'verified':'rejected',action==='verify'?method:'',action==='verify'?reference:'',actor.id,new Date().toISOString(),request.user_id).run();
   return c.json({status:action==='verify'?'verified':'rejected'});
+});
+
+
+// User privacy controls are available both for browser-bound guests and saved accounts.
+// Signatures, votes and authored proposals are deleted as part of full erasure.
+app.get('/api/me/export',async c=>{
+  const actor=await getActor(c);
+  if(!actor)return c.json({error:'An active account or guest session is required.'},401);
+  const data=await Promise.all([
+    c.env.DB.prepare('SELECT slug,title,description,kind,category,location,created_at,status FROM proposals WHERE author_id=?').bind(actor.id).all(),
+    c.env.DB.prepare('SELECT p.slug,v.stance,v.show_name,v.public_name,v.updated_at FROM votes v JOIN proposals p ON p.id=v.proposal_id WHERE v.user_id=?').bind(actor.id).all(),
+    c.env.DB.prepare('SELECT p.slug,c.body,c.created_at,c.public_name FROM comments c JOIN proposals p ON p.id=c.proposal_id WHERE c.user_id=?').bind(actor.id).all(),
+    c.env.DB.prepare('SELECT p.slug,s.id,s.signer_name,s.signer_email,s.document_hash,s.consent_text,s.consent_version,s.signed_at,s.show_name FROM signatures s JOIN proposals p ON p.id=s.proposal_id WHERE s.user_id=?').bind(actor.id).all(),
+    c.env.DB.prepare('SELECT email,verified_at FROM verified_emails WHERE user_id=?').bind(actor.id).first(),
+    c.env.DB.prepare('SELECT locality,region,postal_code,status,requested_at FROM location_verifications WHERE user_id=?').bind(actor.id).first(),
+    c.env.DB.prepare('SELECT p.slug,sp.saved_at FROM saved_proposals sp JOIN proposals p ON p.id=sp.proposal_id WHERE sp.user_id=?').bind(actor.id).all()
+  ]);
+  return c.json({
+    exportedAt:new Date().toISOString(),account:actor.is_guest?'guest':'registered',
+    profile:actor.is_guest?null:{email:actor.email,displayName:actor.display_name},
+    proposals:data[0].results??[],votes:data[1].results??[],comments:data[2].results??[],
+    electronicSignatures:data[3].results??[],verifiedEmail:data[4],locationRequest:data[5],savedProposals:data[6].results??[]
+  });
+});
+app.delete('/api/me/account',async c=>{
+  const actor=await getActor(c);
+  if(!actor)return c.json({error:'An active account or guest session is required.'},401);
+  const input=await body(c);
+  if(safeString(input,'confirmation')!=='DELETE MY DATA')
+    return c.json({error:'Type DELETE MY DATA to confirm deletion.'},400);
+  if(!actor.is_guest){
+    const password=safeString(input,'password');
+    const row=await c.env.DB.prepare('SELECT password_hash,password_salt FROM users WHERE id=?')
+      .bind(actor.id).first<{password_hash:string;password_salt:string}>();
+    if(!row||!password||!constantTimeMatch(await passwordHash(password,row.password_salt),row.password_hash))
+      return c.json({error:'Enter your account password to confirm deletion.'},403);
+  }
+  // Preserve anonymous moderation audit continuity while removing the person's identity.
+  await c.env.DB.batch([
+    c.env.DB.prepare("INSERT OR IGNORE INTO users(id,email,display_name,password_hash,password_salt,is_guest) VALUES('system-erased-moderator','erased-moderator@invalid.my-petition.local','Former moderator','disabled','disabled',1)"),
+    c.env.DB.prepare("UPDATE moderation_audit SET moderator_id='system-erased-moderator' WHERE moderator_id=?").bind(actor.id),
+    c.env.DB.prepare('UPDATE reports SET reviewed_by=NULL WHERE reviewed_by=?').bind(actor.id),
+    c.env.DB.prepare('UPDATE location_verifications SET moderator_id=NULL WHERE moderator_id=?').bind(actor.id),
+    c.env.DB.prepare("DELETE FROM reports WHERE target_type='proposal' AND target_id IN(SELECT id FROM proposals WHERE author_id=?)").bind(actor.id),
+    c.env.DB.prepare("DELETE FROM reports WHERE target_type='comment' AND target_id IN(SELECT id FROM comments WHERE user_id=?)").bind(actor.id),
+    c.env.DB.prepare('DELETE FROM proposals WHERE author_id=?').bind(actor.id),
+    c.env.DB.prepare('DELETE FROM users WHERE id=?').bind(actor.id)
+  ]);
+  c.header('Set-Cookie',cookieName+'=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',{append:true});
+  c.header('Set-Cookie',guestCookieName+'=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',{append:true});
+  return c.json({deleted:true,notice:'This erases your saved account or guest session and associated participation, including e-signatures. Public signature receipt verification for erased signatures will no longer work.'});
 });
 
 app.notFound((c) => c.json({ error: 'API endpoint not found.' }, 404));
