@@ -147,7 +147,7 @@ async function getActor(c: Context<AppEnv>, createGuest = false): Promise<Actor 
   const salt = randomHex(16);
   // No usable account password or personal email is generated for guests.
   await c.env.DB.prepare('INSERT INTO users(id,email,display_name,password_hash,password_salt,is_guest) VALUES(?,?,?,?,?,1)')
-    .bind(id, 'guest-' + id + '@invalid.my-petition.local', 'Guest participant', await passwordHash(randomHex(32),salt),salt).run();
+    .bind(id, 'guest-' + id + '@invalid.my-petition.local', 'Guest participant', '!guest-login-disabled:'+randomHex(32),salt).run();
   await c.env.DB.prepare('INSERT INTO guest_sessions(token_hash,user_id,expires_at) VALUES(?,?,?)')
     .bind(await sha256(newToken),id,new Date(Date.now()+365*86400000).toISOString()).run();
   setHttpCookie(c,guestCookieName,newToken,365);
@@ -267,9 +267,9 @@ app.post('/api/auth/logout', async (c) => {
 
 app.get('/api/stats', async (c) => {
   const [proposals, votes, participants] = await Promise.all([
-    c.env.DB.prepare('SELECT COUNT(*) AS n FROM proposals').first<{ n: number }>(),
-    c.env.DB.prepare('SELECT COUNT(*) AS n FROM votes').first<{ n: number }>(),
-    c.env.DB.prepare('SELECT COUNT(DISTINCT user_id) AS n FROM votes').first<{ n: number }>()
+    c.env.DB.prepare("SELECT COUNT(*) AS n FROM proposals WHERE visibility='visible'").first<{ n: number }>(),
+    c.env.DB.prepare("SELECT COUNT(*) AS n FROM votes v JOIN proposals p ON p.id=v.proposal_id WHERE p.visibility='visible'").first<{ n: number }>(),
+    c.env.DB.prepare("SELECT COUNT(DISTINCT v.user_id) AS n FROM votes v JOIN proposals p ON p.id=v.proposal_id WHERE p.visibility='visible'").first<{ n: number }>()
   ]);
   return c.json({ proposals: proposals?.n ?? 0, votes: votes?.n ?? 0, participants: participants?.n ?? 0 });
 });
@@ -279,7 +279,7 @@ app.get('/api/proposals', async (c) => {
   const category = c.req.query('category') ?? '';
   const sort = c.req.query('sort') === 'recent' ? 'recent' : 'popular';
   const page = Math.max(1, Math.min(100, Number.parseInt(c.req.query('page') ?? '1', 10) || 1));
-  const conditions: string[] = [];
+  const conditions: string[] = ["p.visibility='visible'"];
   const values: (string | number)[] = [];
   if (q) { conditions.push('(p.title LIKE ? OR p.description LIKE ? OR p.location LIKE ?)'); values.push('%' + q + '%', '%' + q + '%', '%' + q + '%'); }
   if (categories.includes(category)) { conditions.push('p.category=?'); values.push(category); }
@@ -310,8 +310,6 @@ app.get('/api/proposals/:slug', async (c) => {
 });
 
 app.post('/api/proposals', async (c) => {
-  const user = await getActor(c,true);
-  if (!user) return c.json({ error: 'Could not establish your guest session.' }, 500);
   const payload = await body(c);
   const title = safeString(payload, 'title');
   const description = safeString(payload, 'description');
@@ -328,7 +326,8 @@ app.post('/api/proposals', async (c) => {
   if (!categories.includes(category)) return c.json({ error: 'Choose a category.' }, 400);
   if (location.length > 100) return c.json({ error: 'Location must be under 100 characters.' }, 400);
   if (kind !== 'petition' && kind !== 'poll') return c.json({ error: 'Choose a proposal type.' }, 400);
-  if (user.is_guest && (authorName.length<2 || authorName.length>60)) return c.json({error:'Please enter a creator display name (2–60 characters).'},400);
+  const existingActor = await getActor(c);
+  if ((!existingActor || existingActor.is_guest) && (authorName.length<2 || authorName.length>60)) return c.json({error:'Please enter a creator display name (2–60 characters).'},400);
   if (localOnly && (!/^[a-zA-Z .'-]{2,80}$/.test(locality)||!/^[a-zA-Z .'-]{2,80}$/.test(region))) return c.json({error:'Verified-local proposals need a city and state/region.'},400);
   let closesAt: string | null = null;
   if (closesInput) {
@@ -336,6 +335,8 @@ app.post('/api/proposals', async (c) => {
     if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now() + 60 * 60 * 1000 || date.getTime() > Date.now() + 366 * 24 * 60 * 60 * 1000) return c.json({ error: 'Closing date must be between 1 hour and 1 year in the future.' }, 400);
     closesAt = date.toISOString();
   }
+  const user = existingActor ?? await getActor(c,true);
+  if (!user) return c.json({error:'Could not establish a guest session.'},500);
   const volume = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM proposals WHERE author_id=? AND created_at > ?')
     .bind(user.id, new Date(Date.now() - 86400000).toISOString()).first<{ n: number }>();
   if ((volume?.n ?? 0) >= 5) return c.json({ error: 'You can create up to 5 proposals per day.' }, 429);
@@ -346,17 +347,19 @@ app.post('/api/proposals', async (c) => {
 });
 
 app.post('/api/proposals/:slug/vote', async (c) => {
-  const user = await getActor(c,true);
-  if (!user) return c.json({ error: 'Could not establish your guest session.' }, 500);
   const p = await fetchProposal(c, c.req.param('slug'));
   if (!p) return c.json({ error: 'Proposal not found.' }, 404);
   if (!openForVoting(p)) return c.json({ error: 'Voting has closed.' }, 409);
-  if(!await isEligibleLocally(c,user,p)) return c.json({error:'This proposal requires approved local verification. Request verification from the participation panel.'},403);
   const payload = await body(c);
   const stance = safeString(payload, 'stance');
   const publicName = safeString(payload,'publicName');
-  if(payload.showName===true && user.is_guest && (publicName.length<2 || publicName.length>60)) return c.json({error:'Enter a public display name (2–60 characters) or vote privately.'},400);
   if (!['support', 'oppose'].includes(stance) || typeof payload.showName !== 'boolean') return c.json({ error: 'Choose a position and name visibility.' }, 400);
+  const existingActor = await getActor(c);
+  if(payload.showName===true && (!existingActor || existingActor.is_guest) && (publicName.length<2 || publicName.length>60)) return c.json({error:'Enter a public display name (2–60 characters) or vote privately.'},400);
+  // Restricted polls must not manufacture guest identities for ineligible requests.
+  if(p.local_only && (!existingActor || !await isEligibleLocally(c,existingActor,p))) return c.json({error:'This proposal requires approved local verification. Request verification from the participation panel.'},403);
+  const user = existingActor ?? await getActor(c,true);
+  if (!user) return c.json({ error: 'Could not establish your guest session.' }, 500);
   const previous = await c.env.DB.prepare('SELECT updated_at FROM votes WHERE proposal_id=? AND user_id=?')
     .bind(p.id, user.id).first<{ updated_at: string }>();
   if (previous && Date.now() - new Date(previous.updated_at).getTime() < 2000) return c.json({ error: 'Please wait a moment before changing your vote.' }, 429);
@@ -367,15 +370,16 @@ app.post('/api/proposals/:slug/vote', async (c) => {
 });
 
 app.post('/api/proposals/:slug/comments', async (c) => {
-  const user = await getActor(c,true);
-  if (!user) return c.json({ error: 'Could not establish your guest session.' }, 500);
   const p = await fetchProposal(c, c.req.param('slug'));
   if (!p) return c.json({ error: 'Proposal not found.' }, 404);
   const payload = await body(c);
-  const publicName=safeString(payload,'publicName');
-  if(user.is_guest && (publicName.length<2 || publicName.length>60)) return c.json({error:'Enter a display name to publish a public comment.'},400);
   const comment = safeString(payload, 'body');
+  const publicName=safeString(payload,'publicName');
   if (comment.length < 3 || comment.length > 1000) return c.json({ error: 'Comment must be 3–1,000 characters.' }, 400);
+  const existingActor=await getActor(c);
+  if((!existingActor || existingActor.is_guest) && (publicName.length<2 || publicName.length>60)) return c.json({error:'Enter a display name to publish a public comment.'},400);
+  const user=existingActor ?? await getActor(c,true);
+  if(!user) return c.json({error:'Could not establish your guest session.'},500);
   const last = await c.env.DB.prepare('SELECT created_at FROM comments WHERE user_id=? ORDER BY created_at DESC LIMIT 1').bind(user.id).first<{created_at:string}>();
   if (last && Date.now() - new Date(last.created_at).getTime() < 20000) return c.json({ error: 'Please wait 20 seconds between comments.' }, 429);
   await c.env.DB.prepare('INSERT INTO comments (id,proposal_id,user_id,body,public_name) VALUES (?,?,?,?,?)').bind(crypto.randomUUID(),p.id,user.id,comment,user.is_guest?publicName:null).run();
@@ -552,8 +556,6 @@ app.post('/api/me/notifications/read',async c=>{
   return c.json({success:true});
 });
 app.post('/api/reports',async c=>{
-  const actor=await getActor(c,true);
-  if(!actor) return c.json({error:'Could not establish a session.'},500);
   const input=await body(c);
   const targetType=safeString(input,'targetType');
   const targetId=safeString(input,'targetId');
@@ -564,6 +566,8 @@ app.post('/api/reports',async c=>{
     ?await c.env.DB.prepare("SELECT id FROM proposals WHERE id=? AND visibility='visible'").bind(targetId).first()
     :await c.env.DB.prepare("SELECT id FROM comments WHERE id=? AND visibility='visible'").bind(targetId).first();
   if(!exists) return c.json({error:'That content is not available.'},404);
+  const actor=await getActor(c,true);
+  if(!actor) return c.json({error:'Could not establish a session.'},500);
   const count=await c.env.DB.prepare('SELECT COUNT(*) AS n FROM reports WHERE reporter_id=? AND created_at>?')
     .bind(actor.id,new Date(Date.now()-86400000).toISOString()).first<{n:number}>();
   if((count?.n??0)>=8) return c.json({error:'Daily reporting limit reached.'},429);
