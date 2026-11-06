@@ -6,3 +6,7 @@ dist/
 *.tsbuildinfo
 .DS_Store
 coverage/
+
+# Generated production config; never commit.
+wrangler.production.jsonc
+.secrets.production.json

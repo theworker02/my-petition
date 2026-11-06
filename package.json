@@ -1,6 +1,6 @@
 {
   "name": "my-petition",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,8 @@
     "db:local": "wrangler d1 migrations apply my-petition-db --local",
     "db:remote": "wrangler d1 migrations apply my-petition-db --remote",
     "deploy": "npm run build && wrangler deploy",
-    "test:smoke": "node scripts/smoke-test.mjs"
+    "test:smoke": "node scripts/smoke-test.mjs",
+    "release:prepare": "node scripts/prepare-production.mjs"
   },
   "dependencies": {
     "hono": "^4.10.0",
