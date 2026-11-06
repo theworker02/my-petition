@@ -117,6 +117,11 @@ async function verifyTurnstile(c: Context<AppEnv>, token: string): Promise<boole
   const parsed = await verification.json() as { success?: boolean };
   return parsed.success === true;
 }
+async function requireGuestChallenge(c:Context<AppEnv>, payload:Record<string,unknown>):Promise<boolean>{
+  // Cloudflare challenges are required for unauthenticated writes in production.
+  if(await currentUser(c)) return true;
+  return verifyTurnstile(c,safeString(payload,'turnstileToken'));
+}
 async function fetchProposal(c: Context<AppEnv>, slug: string): Promise<ProposalRow | null> {
   return c.env.DB.prepare(selectProposal + " WHERE p.slug=? AND p.visibility='visible'").bind(slug).first<ProposalRow>();
 }
@@ -420,6 +425,7 @@ app.post('/api/proposals', async (c) => {
     if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now() + 60 * 60 * 1000 || date.getTime() > Date.now() + 366 * 24 * 60 * 60 * 1000) return c.json({ error: 'Closing date must be between 1 hour and 1 year in the future.' }, 400);
     closesAt = date.toISOString();
   }
+  if(!await requireGuestChallenge(c,payload)) return c.json({error:'Complete the anti-spam challenge.'},400);
   const user = existingActor ?? await getActor(c,true);
   if (!user) return c.json({error:'Could not establish a guest session.'},500);
   const volume = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM proposals WHERE author_id=? AND created_at > ?')
@@ -440,6 +446,7 @@ app.post('/api/proposals/:slug/vote', async (c) => {
   const publicName = safeString(payload,'publicName');
   if (!['support', 'oppose'].includes(stance) || typeof payload.showName !== 'boolean') return c.json({ error: 'Choose a position and name visibility.' }, 400);
   const existingActor = await getActor(c);
+  if(!await requireGuestChallenge(c,payload)) return c.json({error:'Complete the anti-spam challenge.'},400);
   if(payload.showName===true && (!existingActor || existingActor.is_guest) && (publicName.length<2 || publicName.length>60)) return c.json({error:'Enter a public display name (2–60 characters) or vote privately.'},400);
   // Restricted polls must not manufacture guest identities for ineligible requests.
   if(p.local_only && (!existingActor || !await isEligibleLocally(c,existingActor,p))) return c.json({error:'This proposal requires approved local verification. Request verification from the participation panel.'},403);
@@ -462,6 +469,7 @@ app.post('/api/proposals/:slug/comments', async (c) => {
   const publicName=safeString(payload,'publicName');
   if (comment.length < 3 || comment.length > 1000) return c.json({ error: 'Comment must be 3–1,000 characters.' }, 400);
   const existingActor=await getActor(c);
+  if(!await requireGuestChallenge(c,payload)) return c.json({error:'Complete the anti-spam challenge.'},400);
   if((!existingActor || existingActor.is_guest) && (publicName.length<2 || publicName.length>60)) return c.json({error:'Enter a display name to publish a public comment.'},400);
   const user=existingActor ?? await getActor(c,true);
   if(!user) return c.json({error:'Could not establish your guest session.'},500);
@@ -685,6 +693,7 @@ app.post('/api/reports',async c=>{
     ?await c.env.DB.prepare("SELECT id FROM proposals WHERE id=? AND visibility='visible'").bind(targetId).first()
     :await c.env.DB.prepare("SELECT id FROM comments WHERE id=? AND visibility='visible'").bind(targetId).first();
   if(!exists) return c.json({error:'That content is not available.'},404);
+  if(!await requireGuestChallenge(c,input)) return c.json({error:'Complete the anti-spam challenge.'},400);
   const actor=await getActor(c,true);
   if(!actor) return c.json({error:'Could not establish a session.'},500);
   const count=await c.env.DB.prepare('SELECT COUNT(*) AS n FROM reports WHERE reporter_id=? AND created_at>?')
