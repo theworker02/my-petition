@@ -34,7 +34,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install project dependencies
-        run: npm install
+        run: npm ci
       - name: Build UI assets for Wrangler
         run: npm run build
       - name: Install screenshot runner
