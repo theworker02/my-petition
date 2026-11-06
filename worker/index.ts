@@ -167,7 +167,7 @@ async function isEligibleLocally(c: Context<AppEnv>, actor: Actor, p: ProposalRo
   return lv?.status==='verified' && lv.locality.toLowerCase()===p.locality.toLowerCase() && lv.region.toLowerCase()===p.region.toLowerCase();
 }
 async function hmacHex(secret:string, data:string) {
-  const key=await crypto.subtle.importKey('raw',encoder.encode(secret),'HMAC',false,['sign']);
+  const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
   return textToHex(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(data))));
 }
 
