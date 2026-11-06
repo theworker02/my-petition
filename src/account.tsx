@@ -7,7 +7,7 @@ import { TurnstileChallenge,useTurnstileSiteKey } from './turnstile';
 export function ResetPasswordPage(){
   const siteKey=useTurnstileSiteKey();
   const [email,setEmail]=useState('');
-  const [token,setToken]=useState(()=>new URLSearchParams(window.location.search).get('token')||'');
+  const [token]=useState(()=>new URLSearchParams(window.location.search).get('token')||'');
   const [newPassword,setNewPassword]=useState('');
   const [confirmPassword,setConfirmPassword]=useState('');
   const [captcha,setCaptcha]=useState('');
