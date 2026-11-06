@@ -132,7 +132,7 @@ async function run(){
   assert.ok(!JSON.stringify(checked.data).includes(signerEmail),'Private signer email is never returned by public verification');
   assert.ok(!JSON.stringify(checked.data).includes('Demo Verified Signer'),'Private signer name is never returned by public verification');
   const receipt=await request(detailPath+'/signature-receipt',{cookie:signerCookie});
-  status(receipt,200,'Private signer's receipt');
+  status(receipt,200,"Private signer's receipt");
   assert.equal(receipt.data.integrity,'valid');
   assert.equal(receipt.data.receipt.signer_email,signerEmail);
   details=await request(detailPath);

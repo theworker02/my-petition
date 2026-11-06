@@ -12,6 +12,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install
+      - run: for file in scripts/*.mjs; do node --check "$file"; done
       - run: npm run typecheck
       - run: npm run build
       - run: npm run db:local
