@@ -71,6 +71,8 @@ async function run(){
   status(readiness,200,'Development readiness');
   assert.equal(readiness.data.ready,true);
   const health=await request('/api/health');
+  status(await request('/api/auth/password-reset/request',{method:'POST',body:{email:'not-configured@example.test'}}),503,'Email recovery fails closed without delivery configuration');
+  status(await request('/api/auth/password-reset/confirm',{method:'POST',body:{token:'a'.repeat(64),newPassword:'secure-test-password-123456'}}),503,'Password reset confirmation requires configured secret');
   status(health,200,'Health endpoint');
   assert.equal(health.data.product,'My Petition');
 
@@ -180,6 +182,9 @@ async function run(){
   assert.equal(saved.data.saved,true);
   const accountActivity=await request('/api/me/activity',{cookie:newAccount.cookie});
   assert.ok(accountActivity.data.saved.some(p=>p.slug===slug),'Saved proposal visible to account');
+  const accountExport=await request('/api/me/export',{cookie:newAccount.cookie});
+  status(accountExport,200,'Registered account export');
+  assert.equal(accountExport.data.profile.email,'smoke-'+nonce+'@example.test');
   const loggedOut=await request('/api/auth/logout',{method:'POST',cookie:newAccount.cookie,body:{}});
   status(loggedOut,200,'Log out');
   status(await request(detailPath+'/save',{method:'POST',cookie:newAccount.cookie,body:{saved:true}}),401,'Logged-out session refused');
@@ -189,6 +194,22 @@ async function run(){
   details=await request(detailPath);
   assert.equal(details.data.proposal.is_open,false);
   status(await request(detailPath+'/vote',{method:'POST',cookie:created.cookie,body:{stance:'support',showName:false}}),409,'Closed petition blocks new votes');
+  const guestExport=await request('/api/me/export',{cookie:created.cookie});
+  status(guestExport,200,'Guest data export');
+  assert.ok(guestExport.data.proposals.some(item=>item.slug===slug));
+  const rejectDelete=await request('/api/me/account',{method:'DELETE',cookie:created.cookie,body:{confirmation:'not confirmed'}});
+  status(rejectDelete,400,'Destructive guest erasure needs typed confirmation');
+  const deletedGuest=await request('/api/me/account',{method:'DELETE',cookie:created.cookie,body:{confirmation:'DELETE MY DATA'}});
+  status(deletedGuest,200,'Guest can erase participation and authored proposals');
+  assert.equal(deletedGuest.data.deleted,true);
+  status(await request(detailPath),404,'Erased guest proposal no longer public');
+  status(await request('/api/signatures/'+signed.data.receiptId+'/verify'),404,'Erased signatures are no longer verifiable');
+  status(await request('/api/me/export',{cookie:created.cookie}),401,'Erased guest token revoked');
+  const relogin=await request('/api/auth/login',{method:'POST',body:{email:'smoke-'+nonce+'@example.test',password:'long-test-password-32-'+nonce}});
+  status(relogin,200,'Account can log in after explicit logout');
+  status(await request('/api/me/account',{method:'DELETE',cookie:relogin.cookie,body:{confirmation:'DELETE MY DATA',password:'wrong-password'}}),403,'Account deletion requires password');
+  status(await request('/api/me/account',{method:'DELETE',cookie:relogin.cookie,body:{confirmation:'DELETE MY DATA',password:'long-test-password-32-'+nonce}}),200,'Account holder can erase account');
+  status(await request('/api/auth/login',{method:'POST',body:{email:'smoke-'+nonce+'@example.test',password:'long-test-password-32-'+nonce}}),401,'Deleted account cannot log in');
   console.log('PASS: API smoke checks for guest participation, support/oppose votes, private receipt integrity, opt-in signer names, moderation, local restrictions, account saves and proposal closure.');
 }
 try{await run();}
