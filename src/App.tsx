@@ -7,6 +7,7 @@ import {
   Sparkles, ThumbsDown, ThumbsUp, Users, Vote, X
 } from 'lucide-react';
 import { api, categories, number, percentage, relativeDate, type Activity, type Category, type ListResponse, type Position, type Proposal, type ProposalDetail, type Stats, type User } from './api';
+import { TurnstileChallenge, useTurnstileSiteKey } from './turnstile';
 import { SignaturePanel, LocationPanel, SharePanel, SaveButton, ReportButton, NotificationsBell, EmbedPage, ModerationPage, VerifySignaturePage } from './features';
 
 type AuthContextValue = { user: User | null; loading: boolean; openAuth: () => void; logout: () => Promise<void> };
@@ -14,15 +15,6 @@ const AuthContext = createContext<AuthContextValue>({ user: null, loading: true,
 const useAuth = () => useContext(AuthContext);
 const icons = { Community: HeartHandshake, Environment: Leaf, Infrastructure: Landmark, Education: Globe2, Technology: Sparkles, Healthcare: Heart, Other: Compass };
 const colors: Record<Category, string> = { Community: 'lilac', Environment: 'mint', Infrastructure: 'blue', Education: 'peach', Technology: 'lavender', Healthcare: 'rose', Other: 'yellow' };
-
-declare global {
-  interface Window {
-    turnstile?: {
-      render: (element: HTMLElement, options: { sitekey: string; callback: (token: string) => void; 'expired-callback': () => void }) => string;
-      remove: (id: string) => void;
-    };
-  }
-}
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -249,6 +241,11 @@ function ProposalPage() {
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
   const [message, setMessage] = useState('');
+  const siteKey=useTurnstileSiteKey();
+  const [voteToken,setVoteToken]=useState('');
+  const [commentToken,setCommentToken]=useState('');
+  const [voteChallengeVersion,setVoteChallengeVersion]=useState(0);
+  const [commentChallengeVersion,setCommentChallengeVersion]=useState(0);
   const reload = async () => {const next = await api<ProposalDetail>('/proposals/' + encodeURIComponent(slug || ''));setData(next);setSaved(next.saved);return next;};
   const toggleSave=async()=>{if(!user){openAuth();return;}try{const result=await api<{saved:boolean}>('/proposals/'+encodeURIComponent(slug||'')+'/save',{saved:!saved});setSaved(result.saved);setSaveNotice(result.saved?'Added to your saved petitions.':'Removed from saved petitions.');}catch(e){setSaveNotice((e as Error).message);}};
   useEffect(() => {
@@ -262,7 +259,7 @@ function ProposalPage() {
   const submitVote = async () => {
     if (!stance || !slug) return;
     setVoting(true); setMessage('');
-    try { await api('/proposals/' + encodeURIComponent(slug) + '/vote', { stance, showName,publicName }); await reload(); setVoted(true); }
+    try { await api('/proposals/' + encodeURIComponent(slug) + '/vote', { stance, showName,publicName,turnstileToken:voteToken }); await reload(); setVoted(true);setVoteToken('');setVoteChallengeVersion(v=>v+1); }
     catch (e) { setMessage((e as Error).message); }
     finally { setVoting(false); }
   };
@@ -270,7 +267,7 @@ function ProposalPage() {
     e.preventDefault();
     if (!comment.trim() || !slug) return;
     setPosting(true); setMessage('');
-    try { await api('/proposals/' + encodeURIComponent(slug) + '/comments', {body:comment,publicName:commentName});setComment('');await reload(); }
+    try { await api('/proposals/' + encodeURIComponent(slug) + '/comments', {body:comment,publicName:commentName,turnstileToken:commentToken});setComment('');setCommentToken('');setCommentChallengeVersion(v=>v+1);await reload(); }
     catch (e) { setMessage((e as Error).message); }
     finally { setPosting(false); }
   };
@@ -300,7 +297,7 @@ function ProposalPage() {
           {message && <ErrorBox message={message} />}
           <form className="comment-form" onSubmit={e => { void submitComment(e); }}>
             <span className="avatar">{user?.display_name.charAt(0).toUpperCase() ?? '?'}</span>
-            <div className="comment-fields">{!user&&<input className="guest-name-input" aria-label="Your public comment display name" placeholder="Your display name (shown with your comment)" required minLength={2} maxLength={60} value={commentName} onChange={e=>setCommentName(e.target.value)}/>}<textarea aria-label="Write a public comment" placeholder="Add your perspective to the conversation..." value={comment} maxLength={1000} onChange={e => setComment(e.target.value)} rows={3} /><div className="comment-actions"><small>Comments show your chosen display name publicly. No account required.</small><button disabled={posting || comment.trim().length < 3 || (!user&&commentName.trim().length<2)} className="button button-primary" type="submit">{posting ? 'Posting...' : 'Post comment'} <Send size={16} /></button></div></div>
+            <div className="comment-fields">{!user&&<input className="guest-name-input" aria-label="Your public comment display name" placeholder="Your display name (shown with your comment)" required minLength={2} maxLength={60} value={commentName} onChange={e=>setCommentName(e.target.value)}/>}<textarea aria-label="Write a public comment" placeholder="Add your perspective to the conversation..." value={comment} maxLength={1000} onChange={e => setComment(e.target.value)} rows={3} />{siteKey&&!user&&<TurnstileChallenge key={commentChallengeVersion} siteKey={siteKey} onToken={setCommentToken}/>}<div className="comment-actions"><small>Comments show your chosen display name publicly. No account required.</small><button disabled={posting || comment.trim().length < 3 || (!user&&commentName.trim().length<2) || (!user&&Boolean(siteKey)&&!commentToken)} className="button button-primary" type="submit">{posting ? 'Posting...' : 'Post comment'} <Send size={16} /></button></div></div>
           </form>
           <div className="comment-list">{data.comments.length ? data.comments.map(c => <article className="comment" key={c.id}><span className="avatar">{c.display_name.charAt(0).toUpperCase()}</span><div><div className="comment-author"><strong>{c.display_name}</strong><time>{relativeDate(c.created_at)}</time></div><p>{c.body}</p><ReportButton targetType="comment" targetId={c.id}/></div></article>) : <div className="no-comments">No comments yet. You can start the conversation.</div>}</div>
         </div>
@@ -317,7 +314,8 @@ function ProposalPage() {
             <div className="vote-choices"><button className={'vote-choice support-choice' + (stance === 'support' ? ' selected' : '')} onClick={() => setStance('support')} aria-pressed={stance === 'support'}><span><ThumbsUp size={22} /> I support this</span><span className="choice-check">{stance === 'support' && <Check size={17} />}</span></button><button className={'vote-choice oppose-choice' + (stance === 'oppose' ? ' selected' : '')} onClick={() => setStance('oppose')} aria-pressed={stance === 'oppose'}><span><ThumbsDown size={22} /> I oppose this</span><span className="choice-check">{stance === 'oppose' && <Check size={17} />}</span></button></div>
             <label className="name-choice"><input type="checkbox" checked={showName} onChange={e => setShowName(e.target.checked)} /><span><Eye size={17}/> Show my display name publicly <small>{showName?'A name will appear alongside your position.':'Your display name stays hidden on this vote.'}</small></span></label>
             {showName&&!user&&<input className="guest-name-input vote-name" aria-label="Public voting name" minLength={2} maxLength={60} placeholder="Display name (shown publicly)" value={publicName} onChange={e=>setPublicName(e.target.value)}/>} 
-            <button disabled={!stance || voting || mineUnchanged || (showName&&!user&&publicName.trim().length<2)} className="button button-primary button-block vote-submit" onClick={() => { void submitVote(); }}>{voting ? 'Submitting...' : data.myVote ? 'Update my vote' : 'Submit my vote'} <ArrowRight size={18} /></button>
+            {siteKey&&!user&&<TurnstileChallenge key={voteChallengeVersion} siteKey={siteKey} onToken={setVoteToken}/>}
+            <button disabled={!stance || voting || mineUnchanged || (showName&&!user&&publicName.trim().length<2) || (!user&&Boolean(siteKey)&&!voteToken)} className="button button-primary button-block vote-submit" onClick={() => { void submitVote(); }}>{voting ? 'Submitting...' : data.myVote ? 'Update my vote' : 'Submit my vote'} <ArrowRight size={18} /></button>
             {voted && <div className="success-note" role="status"><CheckCircle2 size={18} /> Your vote has been recorded.</div>}
           </> : <div className="closed-note"><LockKeyhole size={18} /> This proposal is no longer accepting votes.</div>}
           <div className="privacy-caption"><ShieldCheck size={17} /><span>Anonymous-display votes hide your name publicly. Your browser session or account is used to limit repeat voting; guest participation is not proof of unique identity.</span></div>
@@ -340,12 +338,14 @@ function Create() {
   const [form, setForm] = useState({title:'',description:'',category:'Community',location:'',kind:'petition',closesAt:'',authorName:'',locality:'',region:'',localOnly:false});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const siteKey=useTurnstileSiteKey();
+  const [challengeToken,setChallengeToken]=useState('');
   const update = (key: keyof typeof form, value: string|boolean) => setForm(f => ({ ...f, [key]: value }));
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true); setError('');
     try {
-      const response = await api<{ slug: string }>('/proposals', { ...form, closesAt: form.closesAt ? new Date(form.closesAt).toISOString() : '' });
+      const response = await api<{ slug: string }>('/proposals', { ...form, closesAt: form.closesAt ? new Date(form.closesAt).toISOString() : '',turnstileToken:challengeToken });
       navigate('/proposal/' + response.slug);
     } catch (e) { setError((e as Error).message); }
     finally { setSaving(false); }
@@ -377,8 +377,9 @@ function Create() {
           <label className="feature-checkbox local-creation"><input type="checkbox" checked={form.localOnly} onChange={e=>update('localOnly',e.target.checked)}/> Require independently verified local eligibility to vote or sign</label>
           {form.localOnly&&<div className="locality-inputs"><label className="field-label" htmlFor="local-city">City/town <span>*</span></label><input required id="local-city" className="field-input" minLength={2} maxLength={80} placeholder="e.g. East Haven" value={form.locality} onChange={e=>update('locality',e.target.value)}/><label className="field-label" htmlFor="local-region">State/region <span>*</span></label><input required id="local-region" className="field-input" minLength={2} maxLength={80} placeholder="e.g. Connecticut" value={form.region} onChange={e=>update('region',e.target.value)}/><p>Only independently approved participants can vote or sign. Local approvals require manual review.</p></div>}
         </div></div>
+        {siteKey&&!user&&<TurnstileChallenge siteKey={siteKey} onToken={setChallengeToken}/>}
         {error && <ErrorBox message={error} />}
-        <div className="submit-section"><div><ShieldCheck size={19} /><span>No sign-in required. Keep this browser's session cookie to manage your proposal later.</span></div><button className="button button-primary" disabled={saving} type="submit">{saving ? 'Publishing...' : 'Publish proposal'} <ArrowRight size={18} /></button></div>
+        <div className="submit-section"><div><ShieldCheck size={19} /><span>No sign-in required. Keep this browser's session cookie to manage your proposal later.</span></div><button className="button button-primary" disabled={saving||(!user&&Boolean(siteKey)&&!challengeToken)} type="submit">{saving ? 'Publishing...' : 'Publish proposal'} <ArrowRight size={18} /></button></div>
       </form>
       <aside className="create-sidebar"><div className="preview-card"><span className="preview-tag"><Eye size={15} /> LIVE PREVIEW</span><div className={'preview-art art-' + colors[form.category as Category]}><CategoryIcon category={form.category as Category} size={45} /></div><div className="preview-body"><span className="preview-category">{form.category} · {form.kind === 'petition' ? 'Petition' : 'Public poll'}</span><h3>{form.title || 'Your inspiring idea goes here'}</h3><p>{form.description || 'Your proposal description will appear here as you write it.'}</p><div className="preview-footer"><Users size={17} /> 0 voices <ArrowUpRight size={17} /></div></div></div>
         <div className="tips-card"><Sparkles size={23} /><h3>Tips for a great proposal</h3><ul><li>Ask one clear question.</li><li>Give context from different perspectives.</li><li>Focus on concrete, achievable changes.</li><li>Invite honest participation — not just agreement.</li></ul></div>
@@ -406,27 +407,6 @@ function About() {
   return <main className="container page-container about-page"><div className="page-heading"><div className="eyebrow"><span className="eyebrow-line" /> ABOUT MY PETITION</div><h1>Better ideas start with <span>every voice.</span></h1><p>My Petition is a public participation platform where people can start proposals, share perspectives, and understand the conversation around them.</p></div><div className="about-grid"><div><HeartHandshake size={30} /><h2>Create a petition or poll</h2><p>Introduce a proposal with a clear question and enough context for an informed decision.</p></div><div><Vote size={30} /><h2>Choose your position</h2><p>Support or oppose without registering. Your browser session holds one current response per proposal. You can change it, but clearing cookies can let another response be submitted.</p></div><div><LockKeyhole size={30} /><h2>Decide what to share</h2><p>Choose a public display name or keep your voting name hidden. Guest activity stays associated with this browser; traceable e-signatures require email verification, explicit consent, and a private audit record.</p></div><div><BarChart3 size={30} /><h2>Understand the results</h2><p>See updated counts and signed-petition totals. Save petitions with an account, or participate as a guest. Results reflect only voluntary online participants: they're neither scientific polling nor legal certification.</p></div></div><div className="about-cta"><h2>Ready to make your voice count?</h2><Link className="button button-primary" to="/explore">Explore proposals <ArrowRight size={18} /></Link></div></main>;
 }
 
-function TurnstileChallenge({ siteKey, onToken }: { siteKey: string; onToken: (token: string) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    let widget: string | null = null;
-    let cancelled = false;
-    let polling: number | undefined;
-    function render() {
-      if (cancelled || !ref.current || !window.turnstile) return;
-      widget = window.turnstile.render(ref.current, { sitekey: siteKey, callback: onToken, 'expired-callback': () => onToken('') });
-    }
-    if (!window.turnstile) {
-      const script = document.createElement('script');
-      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-      script.async = true;
-      document.head.appendChild(script);
-      polling = window.setInterval(() => { if (window.turnstile) { window.clearInterval(polling); render(); } }, 150);
-    } else render();
-    return () => { cancelled = true; if (polling) clearInterval(polling); if (widget) window.turnstile?.remove(widget); };
-  }, [siteKey, onToken]);
-  return <div ref={ref} className="turnstile-slot" />;
-}
 function AuthDialog({ onClose, onLogin }: { onClose: () => void; onLogin: (user: User) => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams, useLocation } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, BadgeCheck, Bell, Bookmark, Check, CheckCircle2, ClipboardCopy, Download, FileSignature, Flag, Globe, MailCheck, MapPin, Share2, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { api, number, percentage, type Proposal, type ProposalDetail } from './api';
+import { TurnstileChallenge, useTurnstileSiteKey } from './turnstile';
 import { SIGNATURE_CONSENT_TEXT } from '../shared/signature';
 
 export type Verification = { verifiedEmail: string | null; location: { locality: string; region: string; postal_code: string; status: 'pending'|'verified'|'rejected' } | null; guest: boolean };
@@ -149,6 +150,8 @@ export function SaveButton({ saved, onSave }: { saved:boolean;onSave:()=>Promise
 }
 
 export function ReportButton({ targetType, targetId }: {targetType:'proposal'|'comment';targetId:string}) {
+  const siteKey=useTurnstileSiteKey();
+  const [token,setToken]=useState('');
   const [open,setOpen]=useState(false);
   const [reason,setReason]=useState('spam');
   const [details,setDetails]=useState('');
@@ -156,7 +159,7 @@ export function ReportButton({ targetType, targetId }: {targetType:'proposal'|'c
   const [message,setMessage]=useState('');
   const submit=async(e:FormEvent)=>{
     e.preventDefault();setBusy(true);setMessage('');
-    try{await api('/reports',{targetType,targetId,reason,details});setMessage('Report received. Thank you for helping keep discussions respectful.');}
+    try{await api('/reports',{targetType,targetId,reason,details,turnstileToken:token});setMessage('Report received. Thank you for helping keep discussions respectful.');}
     catch(e){setMessage((e as Error).message);}finally{setBusy(false);}
   };
   return <>
@@ -167,7 +170,8 @@ export function ReportButton({ targetType, targetId }: {targetType:'proposal'|'c
         <form className="inline-form" onSubmit={e=>void submit(e)}>
           <label htmlFor="report-reason">Why are you reporting this?</label><select id="report-reason" value={reason} onChange={e=>setReason(e.target.value)}><option value="spam">Spam or manipulation</option><option value="harassment">Harassment or threats</option><option value="privacy">Private information exposed</option><option value="illegal">Potentially illegal content</option><option value="other">Other</option></select>
           <label htmlFor="report-details">Additional details (optional)</label><textarea id="report-details" maxLength={1000} rows={4} value={details} onChange={e=>setDetails(e.target.value)} placeholder="Help a reviewer understand the issue."/>
-          <button className="button button-primary" disabled={busy}>{busy?'Submitting...':'Submit report'}</button>
+          {siteKey&&<TurnstileChallenge siteKey={siteKey} onToken={setToken}/>}
+          <button className="button button-primary" disabled={busy||(Boolean(siteKey)&&!token)}>{busy?'Submitting...':'Submit report'}</button>
         </form>{message&&<p role="status" className="feature-notice">{message}</p>}
       </div>
     </div>}
