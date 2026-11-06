@@ -10,6 +10,8 @@ type Bindings = {
   EMAIL_OTP_SECRET?: string;
   AUDIT_HASH_SECRET?: string;
   MODERATOR_EMAILS?: string;
+  PRODUCTION_MODE?: string;
+  SITE_SUPPORT_EMAIL?: string;
 };
 type AppEnv = { Bindings: Bindings };
 type Account = { id: string; email: string; display_name: string };
@@ -107,7 +109,7 @@ async function body(c: Context<AppEnv>): Promise<Record<string, unknown>> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 async function verifyTurnstile(c: Context<AppEnv>, token: string): Promise<boolean> {
-  if (!c.env.TURNSTILE_SECRET) return true;
+  if (!c.env.TURNSTILE_SECRET) return c.env.PRODUCTION_MODE!=='true';
   if (!token) return false;
   const params = new URLSearchParams({ secret: c.env.TURNSTILE_SECRET, response: token });
   const verification = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: params });
@@ -208,8 +210,56 @@ async function isModerator(c:Context<AppEnv>,actor:Actor|null) {
 }
 const reasons = ['spam','harassment','privacy','illegal','other'];
 
+
+type RatePolicy={name:string;limit:number;windowSeconds:number};
+function ratePolicyFor(path:string, method:string):RatePolicy|null{
+  if(method==='GET' && /^\/api\/signatures\/[^/]+\/verify$/.test(path)) return {name:'verify-receipt',limit:180,windowSeconds:3600};
+  if(method!=='POST' && method!=='DELETE') return null;
+  if(path==='/api/auth/register') return {name:'register',limit:8,windowSeconds:3600};
+  if(path==='/api/auth/login') return {name:'login',limit:40,windowSeconds:900};
+  if(path==='/api/verification/email/request') return {name:'email-send',limit:12,windowSeconds:3600};
+  if(path==='/api/verification/email/confirm') return {name:'email-confirm',limit:50,windowSeconds:3600};
+  if(path==='/api/verification/location/request') return {name:'location-request',limit:8,windowSeconds:86400};
+  if(path==='/api/reports') return {name:'report',limit:24,windowSeconds:3600};
+  if(path==='/api/proposals') return {name:'create',limit:18,windowSeconds:3600};
+  if(/^\/api\/proposals\/[^/]+\/vote$/.test(path)) return {name:'vote',limit:160,windowSeconds:3600};
+  if(/^\/api\/proposals\/[^/]+\/comments$/.test(path)) return {name:'comment',limit:70,windowSeconds:3600};
+  if(/^\/api\/proposals\/[^/]+\/sign$/.test(path)) return {name:'sign',limit:40,windowSeconds:3600};
+  return null;
+}
+async function consumeLimit(c:Context<AppEnv>,policy:RatePolicy):Promise<{allowed:boolean;retryAfter:number}>{
+  if(!c.env.AUDIT_HASH_SECRET) return {allowed:true,retryAfter:0}; // production rejects missing secret elsewhere
+  // CF-Connecting-IP is assigned by Cloudflare. Never trust client-supplied X-Forwarded-For.
+  const ip=c.req.header('CF-Connecting-IP')||'local-test-client';
+  const key=await hmacHex(c.env.AUDIT_HASH_SECRET,policy.name+'|'+ip);
+  const now=new Date().toISOString();
+  const cutoff=new Date(Date.now()-policy.windowSeconds*1000).toISOString();
+  const result=await c.env.DB.prepare(
+    'INSERT INTO request_rate_limits(rate_key,attempts,window_start) VALUES(?,1,?) '+
+    'ON CONFLICT(rate_key) DO UPDATE SET attempts=CASE WHEN window_start<=? THEN 1 ELSE attempts+1 END, '+
+    'window_start=CASE WHEN window_start<=? THEN excluded.window_start ELSE window_start END '+
+    'RETURNING attempts,window_start'
+  ).bind(key,now,cutoff,cutoff).first<{attempts:number;window_start:string}>();
+  const nextWindow=Math.max(1,Math.ceil((Date.parse(result?.window_start||now)+policy.windowSeconds*1000-Date.now())/1000));
+  return {allowed:(result?.attempts??1)<=policy.limit,retryAfter:nextWindow};
+}
+function operationalReadiness(c:Context<AppEnv>){
+  if(c.env.PRODUCTION_MODE!=='true') return {production:false,ready:true};
+  const required=['RESEND_API_KEY','MAIL_FROM','EMAIL_OTP_SECRET','AUDIT_HASH_SECRET','TURNSTILE_SITE_KEY','TURNSTILE_SECRET','MODERATOR_EMAILS','SITE_SUPPORT_EMAIL'] as const;
+  return {production:true,ready:required.every(key=>typeof c.env[key]==='string' && Boolean(c.env[key]?.trim()))};
+}
+
 app.use('/api/*', async (c, next) => {
+  const state=operationalReadiness(c);
+  c.header('X-Content-Type-Options','nosniff');
+  c.header('Referrer-Policy','no-referrer');
+  c.header('X-Frame-Options','DENY');
+  c.header('Cache-Control','no-store');
+  if(state.production && !state.ready && !['/api/health','/api/ready'].includes(c.req.path))
+    return c.json({error:'Service is temporarily unavailable while production configuration is incomplete.'},503);
   if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
+    const contentLength=Number(c.req.header('Content-Length')||'0');
+    if(contentLength>25000) return c.json({error:'Request body exceeds 25 KB.'},413);
     const origin = c.req.header('Origin');
     const target = new URL(c.req.url);
     // Browsers may omit Origin on same-origin requests; accept only a matching Fetch Metadata context.
@@ -222,12 +272,24 @@ app.use('/api/*', async (c, next) => {
     }
     if (!allowed) return c.json({ error: 'Invalid request origin.' }, 403);
   }
+  const policy=ratePolicyFor(c.req.path,c.req.method);
+  if(policy){
+    const check=await consumeLimit(c,policy);
+    if(!check.allowed){
+      c.header('Retry-After',String(check.retryAfter));
+      return c.json({error:'Too many requests. Try again later.'},429);
+    }
+  }
   await next();
-  c.header('Cache-Control', 'no-store');
-  c.header('X-Content-Type-Options', 'nosniff');
 });
 
 app.get('/api/health', (c) => c.json({ status: 'ok', product: 'My Petition' }));
+app.get('/api/ready', async (c) => {
+  const state=operationalReadiness(c);
+  try { await c.env.DB.prepare('SELECT 1 AS available').first(); }
+  catch {return c.json({ready:false,production:state.production},503);}
+  return c.json({ready:state.ready,production:state.production},state.ready?200:503);
+});
 app.get('/api/config', (c) => c.json({ turnstileSiteKey: c.env.TURNSTILE_SITE_KEY || '' }));
 app.get('/api/session', async (c) => {
   const user=await currentUser(c);

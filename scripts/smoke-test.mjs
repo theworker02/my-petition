@@ -67,6 +67,9 @@ async function ready(){
 }
 async function run(){
   await ready();
+  const readiness=await request('/api/ready');
+  status(readiness,200,'Development readiness');
+  assert.equal(readiness.data.ready,true);
   const health=await request('/api/health');
   status(health,200,'Health endpoint');
   assert.equal(health.data.product,'My Petition');

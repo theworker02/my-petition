@@ -1,0 +1,18 @@
+# Security headers for Workers Static Assets (copied into dist by Vite).
+# APIs are served by the Worker and have separate response security headers.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=()
+  X-Permitted-Cross-Domain-Policies: none
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://challenges.cloudflare.com; connect-src 'self'; img-src 'self' data:; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; frame-src https://challenges.cloudflare.com; upgrade-insecure-requests
+
+/verify-signature*
+  X-Robots-Tag: noindex, nofollow
+  Referrer-Policy: no-referrer
+
+/moderation*
+  X-Robots-Tag: noindex, nofollow
+
+/activity*
+  X-Robots-Tag: noindex, nofollow
