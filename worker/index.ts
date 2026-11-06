@@ -297,12 +297,11 @@ app.get('/api/proposals/:slug', async (c) => {
   const actor=await getActor(c);
   const [myVote, participantRows, commentRows] = await Promise.all([
     actor ? c.env.DB.prepare('SELECT stance,show_name,public_name FROM votes WHERE proposal_id=? AND user_id=?').bind(p.id, actor.id).first<{ stance: string; show_name: number;public_name:string|null }>() : Promise.resolve(null),
-    c.env.DB.prepare('SELECT v.stance, CASE WHEN v.show_name=1 THEN COALESCE(NULLIF(v.public_name,''),u.display_name) ELSE NULL END AS display_name FROM votes v JOIN users u ON u.id=v.user_id WHERE v.proposal_id=? ORDER BY v.updated_at DESC LIMIT 14')
+    c.env.DB.prepare("SELECT v.stance, CASE WHEN v.show_name=1 THEN COALESCE(NULLIF(v.public_name,''),u.display_name) ELSE NULL END AS display_name FROM votes v JOIN users u ON u.id=v.user_id WHERE v.proposal_id=? ORDER BY v.updated_at DESC LIMIT 14")
       .bind(p.id).all<{ stance: string; display_name: string | null }>(),
-    c.env.DB.prepare('SELECT x.id,x.body,x.created_at,COALESCE(NULLIF(x.public_name,''),u.display_name) AS display_name FROM comments x JOIN users u ON u.id=x.user_id WHERE x.proposal_id=? AND x.visibility='visible' ORDER BY x.created_at DESC LIMIT 40')
+    c.env.DB.prepare("SELECT x.id,x.body,x.created_at,COALESCE(NULLIF(x.public_name,''),u.display_name) AS display_name FROM comments x JOIN users u ON u.id=x.user_id WHERE x.proposal_id=? AND x.visibility='visible' ORDER BY x.created_at DESC LIMIT 40")
       .bind(p.id).all<{ id: string; body: string; created_at: string; display_name: string }>()
   ]);
-  const actor=await getActor(c);
   const signature=actor ? await c.env.DB.prepare('SELECT id FROM signatures WHERE proposal_id=? AND user_id=?').bind(p.id,actor.id).first<{id:string}>():null;
   const email=actor?await verifiedEmail(c,actor.id):null;
   const local=actor?await locationVerification(c,actor.id):null;
