@@ -1,10 +1,10 @@
 import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { BrowserRouter, Link, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, BarChart3, Check, CheckCircle2,
+  ArrowLeft, ArrowRight, ArrowUpRight, BarChart3, Check, CheckCircle2,
   ChevronDown, CircleHelp, Compass, Eye, Globe2, Heart, HeartHandshake, Landmark, Leaf,
   LockKeyhole, LogOut, MapPin, Menu, MessageCircle, Plus, Search, Send, ShieldCheck,
-  Sparkles, ThumbsDown, ThumbsUp, TrendingUp, UserCircle2, Users, Vote, X
+  Sparkles, ThumbsDown, ThumbsUp, UserCircle2, Users, Vote, X
 } from 'lucide-react';
 import { api, categories, number, percentage, relativeDate, type Activity, type Category, type ListResponse, type Position, type Proposal, type ProposalDetail, type Stats, type User } from './api';
 
