@@ -189,7 +189,7 @@ async function run(){
   console.log('PASS: API smoke checks for guest participation, support/oppose votes, private receipt integrity, opt-in signer names, moderation, local restrictions, account saves and proposal closure.');
 }
 try{await run();}
-catch(error){console.error(error);console.error('Last Worker output:\n'+output.slice(-3500));process.exitCode=1;}
+catch(error){console.error(error);await sleep(500);console.error('Worker output:\n'+output.slice(-12500));process.exitCode=1;}
 finally{
   try{process.kill(-worker.pid,'SIGTERM');}catch{worker.kill('SIGTERM');}
 }
